@@ -34,7 +34,7 @@ export const registrations: Registration[] = [
 
     applicantName: "Student One",
 
-    eventId: "running-100m",
+    eventId: "event-2",
     eventName: "100m Running",
 
     registrationType: "Individual",
@@ -51,8 +51,8 @@ export const registrations: Registration[] = [
 
     applicantName: "Student Two",
 
-    eventId: "volleyball-2026",
-    eventName: "Volleyball Tournament",
+    eventId: "event-1",
+    eventName: "Inter College Volleyball Tournament",
 
     registrationType: "Team",
 
@@ -79,8 +79,8 @@ export const registrations: Registration[] = [
 
     applicantName: "Student Eight",
 
-    eventId: "badminton-2026",
-    eventName: "Badminton",
+    eventId: "event-3",
+    eventName: "Inter College Badminton",
 
     registrationType: "Individual",
 
