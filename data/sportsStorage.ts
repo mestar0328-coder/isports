@@ -1,4 +1,8 @@
-import type { Sport } from "@/types/sports";
+type Sport = {
+  id?: string;
+  name: string;
+  [key: string]: unknown;
+};
 
 const STORAGE_KEY = "isports_sports";
 

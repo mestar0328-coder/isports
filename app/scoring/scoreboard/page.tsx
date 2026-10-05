@@ -1,273 +1,250 @@
+
+
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 
-import { events } from "@/data/events";
 import { getMatches, StoredMatch } from "@/data/matchStorage";
 import { getScores, StoredScore } from "@/data/scoreStorage";
+import { getEvents } from "@/data/eventsStorage";
+import { getCurrentInchargeAccess } from "@/data/inchargeAuth";
 
 export default function ScoreboardPage() {
-  const assignedEvent = events[0];
+  const searchParams = useSearchParams();
 
-  const [matches, setMatches] = useState<StoredMatch[]>(() =>
-    getMatches()
-  );
+  const eventId = searchParams.get("eventId");
 
-  const [scores, setScores] = useState<StoredScore[]>(() =>
-    getScores()
-  );
+  const [matches, setMatches] = useState<StoredMatch[]>([]);
+  const [scores, setScores] = useState<StoredScore[]>([]);
+  const [authorized, setAuthorized] = useState(false);
 
-  const loadScoreboardData = () => {
-    setMatches(getMatches());
-    setScores(getScores());
-  };
+  const [eventName, setEventName] = useState("");
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      loadScoreboardData();
-    }, 0);
+    const loadData = () => {
+      const access = getCurrentInchargeAccess();
+
+      if (!access || !eventId) {
+        setAuthorized(false);
+        return;
+      }
+
+      const canAccess =
+        access.assignedEventIds.includes(eventId);
+
+      if (!canAccess) {
+        setAuthorized(false);
+        return;
+      }
+
+      const events = getEvents();
+
+      const event = events.find(
+        (item) => item.id === eventId
+      );
+
+      if (!event) {
+        setAuthorized(false);
+        return;
+      }
+
+      setAuthorized(true);
+      setEventName(event.name);
+
+      setMatches(getMatches());
+      setScores(getScores());
+    };
+
+    loadData();
 
     const refreshInterval = setInterval(() => {
-      loadScoreboardData();
+      loadData();
     }, 5000);
 
     return () => {
-      clearTimeout(timer);
       clearInterval(refreshInterval);
     };
-  }, []);
+  }, [eventId]);
 
+  if (!eventId) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-gray-950 px-6 text-white">
+        <div className="w-full max-w-lg rounded-xl border border-gray-800 bg-gray-900 p-8 text-center">
+          <h1 className="text-2xl font-bold">
+            Event Not Selected
+          </h1>
+
+          <p className="mt-3 text-sm text-gray-400">
+            Please open the scoreboard from an assigned event.
+          </p>
+        </div>
+      </main>
+    );
+  }
+
+  if (!authorized) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-gray-950 px-6 text-white">
+        <div className="w-full max-w-lg rounded-xl border border-red-900 bg-gray-900 p-8 text-center">
+          <h1 className="text-2xl font-bold text-red-400">
+            Access Denied
+          </h1>
+
+          <p className="mt-3 text-sm leading-6 text-gray-400">
+            You are not assigned to this event.
+          </p>
+        </div>
+      </main>
+    );
+  }
+
+  /*
+   * IMPORTANT:
+   * Only matches belonging to the selected event
+   * are allowed into the scoreboard.
+   */
   const eventMatches = matches.filter(
-    (match) => match.eventId === assignedEvent.id
+    (match) => match.eventId === eventId
   );
 
-  const getScore = (matchId: string) => {
-    return scores.find((score) => score.matchId === matchId);
-  };
+  const eventMatchIds = new Set(
+    eventMatches.map((match) => match.id)
+  );
 
-  const getStatus = (
-    match: StoredMatch,
-    score?: StoredScore
-  ) => {
-    if (score?.status === "Locked") {
-      return "Completed";
-    }
-
-    if (score?.status === "Submitted") {
-      return "Submitted";
-    }
-
-    return match.status;
-  };
-
-  const getStatusStyle = (status: string) => {
-    if (status === "Live") {
-      return "border-red-800 bg-red-950/40 text-red-400";
-    }
-
-    if (status === "Submitted") {
-      return "border-blue-800 bg-blue-950/40 text-blue-400";
-    }
-
-    if (status === "Completed") {
-      return "border-green-800 bg-green-950/40 text-green-400";
-    }
-
-    return "border-yellow-800 bg-yellow-950/40 text-yellow-400";
-  };
+  /*
+   * Only scores belonging to matches from this event
+   * are allowed into the scoreboard.
+   */
+  const eventScores = scores.filter((score) =>
+    eventMatchIds.has(score.matchId)
+  );
 
   return (
     <main className="min-h-screen bg-gray-950 px-4 py-8 text-white sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-5xl">
+      <div className="mx-auto max-w-6xl">
+
         {/* HEADER */}
-        <section>
-          <p className="text-sm font-semibold uppercase tracking-wide text-blue-400">
-            iSports
+
+        <section className="border-b border-gray-800 pb-8">
+
+          <p className="text-sm font-semibold uppercase tracking-widest text-blue-400">
+            iSports Scoring
           </p>
 
-          <h1 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">
-            Public Scoreboard
+          <h1 className="mt-3 text-3xl font-bold sm:text-4xl">
+            Scoreboard
           </h1>
 
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-gray-400 sm:text-base">
-            View current match scores and match status.
+          <p className="mt-3 text-gray-400">
+            {eventName}
           </p>
 
-          <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-gray-800 bg-gray-900 px-3 py-1.5 text-xs font-medium text-gray-500">
-            <span className="h-2 w-2 rounded-full bg-green-400" />
-            Updates automatically every 5 seconds
-          </div>
         </section>
 
-        {/* EVENT INFORMATION */}
-        <section className="mt-8 rounded-2xl border border-gray-800 bg-gray-900 p-5 shadow-sm sm:p-6">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <p className="text-sm font-semibold uppercase tracking-wide text-blue-400">
-                {assignedEvent.sport}
-              </p>
+        {/* EVENT NOTICE */}
 
-              <h2 className="mt-2 text-2xl font-bold sm:text-3xl">
-                {assignedEvent.name}
-              </h2>
+        <section className="mt-8 rounded-xl border border-blue-900 bg-blue-950/20 p-5">
+          <p className="text-xs font-semibold uppercase tracking-widest text-blue-400">
+            Event Scoreboard
+          </p>
 
-              <p className="mt-3 max-w-2xl text-sm leading-6 text-gray-400">
-                {assignedEvent.description}
-              </p>
-            </div>
+          <h2 className="mt-2 text-xl font-bold">
+            {eventName}
+          </h2>
 
-            <span className="w-fit rounded-full border border-blue-800 bg-blue-950/40 px-3 py-1 text-xs font-bold uppercase tracking-wide text-blue-300">
-              Live Event
-            </span>
-          </div>
-
-          <div className="mt-6 grid gap-3 border-t border-gray-800 pt-5 sm:grid-cols-2">
-            <div className="rounded-xl border border-gray-800 bg-gray-950 p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                Date
-              </p>
-
-              <p className="mt-1 text-sm font-medium text-gray-200">
-                {assignedEvent.date}
-              </p>
-            </div>
-
-            <div className="rounded-xl border border-gray-800 bg-gray-950 p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                Venue
-              </p>
-
-              <p className="mt-1 text-sm font-medium text-gray-200">
-                {assignedEvent.venue}
-              </p>
-            </div>
-          </div>
+          <p className="mt-2 text-sm text-gray-400">
+            Showing scores only for matches belonging to
+            this assigned event.
+          </p>
         </section>
 
         {/* SCOREBOARD */}
-        <section className="mt-8 rounded-2xl border border-gray-800 bg-gray-900 p-5 sm:p-6">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p className="text-sm font-semibold uppercase tracking-wide text-gray-500">
-                Scores
-              </p>
 
-              <h2 className="mt-1 text-2xl font-bold">
-                Live Scoreboard
-              </h2>
-            </div>
-
-            <p className="text-sm text-gray-500">
-              {eventMatches.length}{" "}
-              {eventMatches.length === 1 ? "match" : "matches"}
-            </p>
-          </div>
+        <section className="mt-8">
 
           {eventMatches.length === 0 ? (
-            <div className="mt-6 rounded-xl border border-dashed border-gray-800 bg-gray-950 px-5 py-10 text-center">
-              <p className="text-base font-semibold text-gray-300">
-                No matches available for this event.
-              </p>
+            <div className="rounded-xl border border-dashed border-gray-800 bg-gray-900 p-10 text-center">
+              <h2 className="text-lg font-bold">
+                No Matches
+              </h2>
 
               <p className="mt-2 text-sm text-gray-500">
-                Match scores will appear here when matches are created.
+                No matches have been created for this event.
               </p>
             </div>
           ) : (
-            <div className="mt-6 space-y-5">
+            <div className="space-y-4">
+
               {eventMatches.map((match) => {
-                const score = getScore(match.id);
-                const status = getStatus(match, score);
+                const score = eventScores.find(
+                  (item) =>
+                    item.matchId === match.id
+                );
 
                 return (
-                  <article
+                  <div
                     key={match.id}
-                    className="overflow-hidden rounded-2xl border border-gray-800 bg-gray-950"
+                    className="rounded-xl border border-gray-800 bg-gray-900 p-5 sm:p-6"
                   >
-                    {/* MATCH HEADER */}
-                    <div className="flex flex-col gap-3 border-b border-gray-800 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+
+                    <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+
                       <div>
-                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                          Match
+                        <p className="text-lg font-bold">
+                          {match.teamA}
                         </p>
 
-                        <p className="mt-1 text-sm font-semibold text-gray-300">
-                          {match.id}
-                        </p>
-                      </div>
-
-                      <span
-                        className={`w-fit rounded-full border px-3 py-1 text-xs font-bold uppercase tracking-wide ${getStatusStyle(
-                          status
-                        )}`}
-                      >
-                        {status}
-                      </span>
-                    </div>
-
-                    {/* TEAMS AND SCORES */}
-                    <div className="px-5 py-7 sm:px-8 sm:py-8">
-                      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 text-center sm:gap-6">
-                        <div className="min-w-0">
-                          <p className="break-words text-base font-bold text-gray-100 sm:text-xl">
-                            {match.teamA}
-                          </p>
-
-                          <p className="mt-3 text-5xl font-black tracking-tight sm:text-6xl">
-                            {score ? score.scoreA : 0}
-                          </p>
-                        </div>
-
-                        <div className="rounded-full border border-gray-800 bg-gray-900 px-3 py-2 text-xs font-bold text-gray-500">
+                        <p className="my-1 text-sm font-semibold text-gray-500">
                           VS
-                        </div>
-
-                        <div className="min-w-0">
-                          <p className="break-words text-base font-bold text-gray-100 sm:text-xl">
-                            {match.teamB}
-                          </p>
-
-                          <p className="mt-3 text-5xl font-black tracking-tight sm:text-6xl">
-                            {score ? score.scoreB : 0}
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* MATCH DATE */}
-                      <div className="mt-7 border-t border-gray-800 pt-5 text-center">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-600">
-                          Match Date
                         </p>
 
-                        <p className="mt-1 text-sm text-gray-400">
-                          {match.date}
+                        <p className="text-lg font-bold">
+                          {match.teamB}
+                        </p>
+
+                        <p className="mt-3 text-xs text-gray-500">
+                          Match ID: {match.id}
                         </p>
                       </div>
+
+                      <div className="rounded-xl border border-gray-800 bg-gray-950 p-5 text-center">
+
+                        {score ? (
+                          <>
+                            <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                              Score Available
+                            </p>
+
+                            <p className="mt-2 text-sm font-bold text-green-400">
+                              {score.status}
+                            </p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                              Status
+                            </p>
+
+                            <p className="mt-2 text-sm font-bold text-yellow-400">
+                              Awaiting Score
+                            </p>
+                          </>
+                        )}
+
+                      </div>
+
                     </div>
-                  </article>
+
+                  </div>
                 );
               })}
+
             </div>
           )}
+
         </section>
 
-        {/* NAVIGATION */}
-        <section className="mt-8 grid gap-3 sm:flex sm:flex-wrap">
-          <Link
-            href="/scoring"
-            className="inline-flex min-h-11 items-center justify-center rounded-xl bg-white px-6 py-3 text-sm font-bold text-black transition hover:bg-gray-200"
-          >
-            ← Back to Scoring
-          </Link>
-
-          <Link
-            href="/scoring/public-results"
-            className="inline-flex min-h-11 items-center justify-center rounded-xl bg-blue-600 px-6 py-3 text-sm font-bold text-white transition hover:bg-blue-700"
-          >
-            Public Results →
-          </Link>
-        </section>
       </div>
     </main>
   );

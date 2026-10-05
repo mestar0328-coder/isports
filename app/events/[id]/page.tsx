@@ -1,251 +1,167 @@
 "use client";
 
-import Link from "next/link";
-import { useMemo } from "react";
-import { useParams } from "next/navigation";
-
-import { events } from "@/data/events";
-import { getAllEvents } from "@/data/eventsStorage";
-import { students } from "@/data/students";
+import { useEffect, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import type { SportEvent } from "@/types/events";
+import { getEvents } from "@/data/eventsStorage";
 
 export default function EventDetailsPage() {
   const params = useParams();
+  const router = useRouter();
 
-  const id = params.id as string;
+  const [event, setEvent] = useState<SportEvent | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const allEvents = useMemo(
-    () => getAllEvents(events),
-    []
-  );
+  useEffect(() => {
+    const paramValues = Object.values(params ?? {});
+    const eventId = String(paramValues[0] ?? "").trim();
 
-  const event = allEvents.find(
-    (event) => event.id === id
-  );
+    if (!eventId) {
+      setLoading(false);
+      return;
+    }
 
-  const student = students[0];
+    const foundEvent = getEvents().find(
+      (item) => String(item.id).trim() === eventId
+    );
 
-  if (!id) {
+    setEvent(foundEvent ?? null);
+    setLoading(false);
+  }, [params]);
+
+  if (loading) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-gray-950 px-4 text-white">
-        <div className="text-center">
-          <p className="text-sm font-semibold uppercase tracking-widest text-blue-400">
-            iSports
-          </p>
-
-          <h1 className="mt-3 text-2xl font-bold sm:text-3xl">
-            Loading Event...
-          </h1>
-        </div>
+      <main className="min-h-screen bg-black p-10 text-white">
+        Loading event details...
       </main>
     );
   }
 
   if (!event) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-gray-950 px-4 text-white">
-        <div className="w-full max-w-md rounded-xl border border-gray-800 bg-gray-900 p-6 text-center shadow-sm sm:p-8">
+      <main className="min-h-screen bg-black px-6 py-10 text-white">
+        <div className="mx-auto max-w-3xl">
+          <h1 className="text-3xl font-bold">Event Not Found</h1>
 
-          <p className="text-sm font-semibold uppercase tracking-widest text-blue-400">
-            iSports Events
-          </p>
-
-          <h1 className="mt-4 text-2xl font-bold sm:text-3xl">
-            Event Not Found
-          </h1>
-
-          <p className="mt-3 text-sm leading-6 text-gray-400">
-            The event you are looking for does not exist.
-          </p>
-
-          <Link
-            href="/events"
-            className="mt-6 inline-block w-full rounded-lg bg-white px-5 py-3 text-sm font-bold text-black transition hover:bg-gray-200 sm:w-auto"
+          <button
+            type="button"
+            onClick={() => router.push("/events")}
+            className="mt-6 rounded-lg bg-blue-600 px-5 py-3 font-semibold hover:bg-blue-500"
           >
             Back to Events
-          </Link>
-
+          </button>
         </div>
       </main>
     );
   }
 
-  const isEligible =
-    student.course === "Diploma" &&
-    student.age >= (event.minAge ?? 0) &&
-    student.age <= (event.maxAge ?? 100);
+  const registrationOpen =
+    new Date(event.registrationDeadline) >= new Date();
 
   return (
-    <main className="min-h-screen bg-gray-950 px-4 py-8 text-white sm:px-6 sm:py-10 lg:px-8 lg:py-12">
+    <main className="min-h-screen bg-black px-6 py-10 text-white">
       <div className="mx-auto max-w-4xl">
+        <button
+          type="button"
+          onClick={() => router.push("/events")}
+          className="mb-6 text-sm font-semibold text-blue-400 hover:text-blue-300"
+        >
+          ← Back to All Events
+        </button>
 
-        {/* EVENT HEADER */}
-
-        <section className="border-b border-gray-800 pb-8 sm:pb-10">
-
+        <div className="rounded-2xl border border-gray-800 bg-gray-950 p-6 sm:p-8">
           <p className="text-sm font-semibold uppercase tracking-widest text-blue-400">
             {event.sport}
           </p>
 
-          <h1 className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl lg:text-5xl">
+          <h1 className="mt-3 text-4xl font-bold">
             {event.name}
           </h1>
 
-          <p className="mt-4 max-w-3xl text-sm leading-6 text-gray-400 sm:text-base sm:leading-7">
+          <p className="mt-5 text-lg leading-8 text-gray-300">
             {event.description}
           </p>
 
-        </section>
+          <div className="mt-8 grid gap-5 sm:grid-cols-2">
+            <div className="rounded-lg bg-gray-900 p-4">
+              <p className="text-sm text-gray-400">Date</p>
+              <p className="mt-1 font-semibold">{event.date}</p>
+            </div>
 
-        {/* EVENT DETAILS */}
+            <div className="rounded-lg bg-gray-900 p-4">
+              <p className="text-sm text-gray-400">Venue</p>
+              <p className="mt-1 font-semibold">{event.venue}</p>
+            </div>
 
-        <section className="mt-8 rounded-xl border border-gray-800 bg-gray-900 p-5 shadow-sm sm:mt-10 sm:p-7">
-
-          <h2 className="text-xl font-bold sm:text-2xl">
-            Event Details
-          </h2>
-
-          <div className="mt-6 grid gap-5 sm:grid-cols-2">
-
-            <div className="rounded-lg border border-gray-800 bg-gray-950 p-4">
-              <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-                Date
+            <div className="rounded-lg bg-gray-900 p-4">
+              <p className="text-sm text-gray-400">
+                Registration Type
               </p>
-
-              <p className="mt-2 text-sm font-semibold text-gray-200">
-                {event.date}
+              <p className="mt-1 font-semibold capitalize">
+                {event.registrationType}
               </p>
             </div>
 
-            <div className="rounded-lg border border-gray-800 bg-gray-950 p-4">
-              <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-                Venue
-              </p>
-
-              <p className="mt-2 text-sm font-semibold text-gray-200">
-                {event.venue}
-              </p>
-            </div>
-
-            <div className="rounded-lg border border-gray-800 bg-gray-950 p-4">
-              <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+            <div className="rounded-lg bg-gray-900 p-4">
+              <p className="text-sm text-gray-400">
                 Registration Deadline
               </p>
-
-              <p className="mt-2 text-sm font-semibold text-gray-200">
+              <p className="mt-1 font-semibold">
                 {event.registrationDeadline}
               </p>
             </div>
-
-            <div className="rounded-lg border border-gray-800 bg-gray-950 p-4">
-              <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-                Registration Type
-              </p>
-
-              <p className="mt-2 text-sm font-semibold text-gray-200">
-                {event.registrationType === "team"
-                  ? `Team (${event.teamSize} players)`
-                  : "Individual"}
-              </p>
-            </div>
-
           </div>
 
-        </section>
+          <div className="mt-8">
+            <h2 className="text-2xl font-bold">Eligibility</h2>
 
-        {/* ELIGIBILITY */}
-
-        <section className="mt-6 rounded-xl border border-gray-800 bg-gray-900 p-5 shadow-sm sm:mt-8 sm:p-7">
-
-          <h2 className="text-xl font-bold sm:text-2xl">
-            Eligibility Criteria
-          </h2>
-
-          <ul className="mt-5 space-y-3">
-            {event.eligibility.map(
-              (criterion, index) => (
-                <li
-                  key={index}
-                  className="rounded-lg border border-gray-800 bg-gray-950 px-4 py-3 text-sm leading-6 text-gray-300"
-                >
-                  {criterion}
-                </li>
-              )
-            )}
-          </ul>
-
-        </section>
-
-        {/* REGISTRATION */}
-
-        <section className="mt-6 rounded-xl border border-gray-800 bg-gray-900 p-5 shadow-sm sm:mt-8 sm:p-7">
-
-          <h2 className="text-xl font-bold sm:text-2xl">
-            Registration
-          </h2>
-
-          {isEligible ? (
-            <div className="mt-5">
-
-              <div className="rounded-lg border border-green-800 bg-green-950/30 p-4">
-                <p className="text-sm font-semibold text-green-400">
-                  ✓ You are eligible to register.
-                </p>
-              </div>
-
-              <Link
-                href={`/events/${event.id}/register`}
-                className="mt-5 block w-full rounded-lg bg-white px-6 py-3.5 text-center text-sm font-bold text-black transition hover:bg-gray-200 sm:py-4 sm:text-base"
-              >
-                Register for this Event
-              </Link>
-
-            </div>
-          ) : (
-            <div className="mt-5 rounded-lg border border-red-800 bg-red-950/30 p-4">
-              <p className="text-sm font-semibold text-red-400">
-                ✕ You are not eligible for this event.
+            {event.eligibility.length > 0 ? (
+              <ul className="mt-3 list-disc space-y-2 pl-6 text-gray-300">
+                {event.eligibility.map((item, index) => (
+                  <li key={index}>{item}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-3 text-gray-400">
+                No specific eligibility requirements listed.
               </p>
-            </div>
-          )}
-
-        </section>
-
-        {/* RULES */}
-
-        <section className="mt-6 rounded-xl border border-gray-800 bg-gray-900 p-5 shadow-sm sm:mt-8 sm:p-7">
-
-          <h2 className="text-xl font-bold sm:text-2xl">
-            Rules
-          </h2>
-
-          <ul className="mt-5 space-y-3">
-            {event.rules.map(
-              (rule, index) => (
-                <li
-                  key={index}
-                  className="rounded-lg border border-gray-800 bg-gray-950 px-4 py-3 text-sm leading-6 text-gray-300"
-                >
-                  {rule}
-                </li>
-              )
             )}
-          </ul>
+          </div>
 
-        </section>
+          <div className="mt-8">
+            <h2 className="text-2xl font-bold">Rules</h2>
 
-        {/* BACK BUTTON */}
+            {event.rules.length > 0 ? (
+              <ul className="mt-3 list-disc space-y-2 pl-6 text-gray-300">
+                {event.rules.map((rule, index) => (
+                  <li key={index}>{rule}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-3 text-gray-400">
+                No specific rules listed.
+              </p>
+            )}
+          </div>
 
-        <div className="mt-6 sm:mt-8">
-
-          <Link
-            href="/events"
-            className="inline-block w-full rounded-lg border border-gray-700 px-5 py-3 text-center text-sm font-semibold transition hover:border-gray-600 hover:bg-gray-900 sm:w-auto"
-          >
-            ← Back to Events
-          </Link>
-
+          <div className="mt-8 border-t border-gray-800 pt-6">
+            {registrationOpen ? (
+              <button
+                type="button"
+                onClick={() =>
+                  router.push(`/events/${event.id}/register`)
+                }
+                className="w-full rounded-lg bg-green-600 px-6 py-4 text-lg font-bold text-white transition hover:bg-green-500"
+              >
+                Register for This Event
+              </button>
+            ) : (
+              <div className="rounded-lg bg-red-950 p-4 text-center font-semibold text-red-300">
+                Registration is closed for this event.
+              </div>
+            )}
+          </div>
         </div>
-
       </div>
     </main>
   );

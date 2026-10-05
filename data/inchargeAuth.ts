@@ -1,32 +1,80 @@
+import { getInChargeAccounts } from "./inchargeStorage";
+
 export type InchargeAccess = {
   userName: string;
   role: "Scoring Incharge";
-  eventId: string;
+  assignedEventIds: string[];
   accessType: "Temporary";
   active: boolean;
 };
 
-export const inchargeAccess: InchargeAccess = {
-  userName: "Sports Incharge",
-  role: "Scoring Incharge",
-  eventId: "event-1",
-  accessType: "Temporary",
-  active: true,
-};
+export function getCurrentInchargeAccess(): InchargeAccess | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const savedUser = localStorage.getItem("isports_user");
+
+  if (!savedUser) {
+    return null;
+  }
+
+  try {
+    const parsedUser = JSON.parse(savedUser);
+
+    if (parsedUser.role !== "incharge") {
+      return null;
+    }
+
+    const accounts = getInChargeAccounts();
+
+    const account = accounts.find(
+      (item) =>
+        item.id === parsedUser.accountId ||
+        item.username === parsedUser.username
+    );
+
+    if (!account) {
+      return null;
+    }
+
+    return {
+      userName: account.name,
+      role: "Scoring Incharge",
+      assignedEventIds:
+        account.assignedEventIds || [],
+      accessType: "Temporary",
+      active: account.isActive,
+    };
+  } catch {
+    return null;
+  }
+}
 
 export function isInchargeAuthorized(): boolean {
+  const access = getCurrentInchargeAccess();
+
+  if (!access) {
+    return false;
+  }
+
   return (
-    inchargeAccess.role === "Scoring Incharge" &&
-    inchargeAccess.accessType === "Temporary" &&
-    inchargeAccess.active
+    access.role === "Scoring Incharge" &&
+    access.accessType === "Temporary" &&
+    access.active
   );
 }
 
 export function canAccessEvent(
   eventId: string
 ): boolean {
+  const access = getCurrentInchargeAccess();
+
+  if (!access) {
+    return false;
+  }
+
   return (
-    isInchargeAuthorized() &&
-    inchargeAccess.eventId === eventId
+    access.assignedEventIds.includes(eventId)
   );
 }

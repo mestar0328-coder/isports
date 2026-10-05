@@ -22,7 +22,11 @@ export function getRegistrations(): Registration[] {
     return registrations;
   }
 
-  return JSON.parse(savedRegistrations);
+  try {
+    return JSON.parse(savedRegistrations);
+  } catch {
+    return [];
+  }
 }
 
 export function saveRegistrations(
@@ -35,6 +39,21 @@ export function saveRegistrations(
   localStorage.setItem(
     STORAGE_KEY,
     JSON.stringify(registrationsList)
+  );
+}
+
+export function hasRegistered(
+  applicantName: string,
+  eventId: string
+): boolean {
+  const currentRegistrations =
+    getRegistrations();
+
+  return currentRegistrations.some(
+    (registration) =>
+      registration.eventId === eventId &&
+      registration.applicantName.trim().toLowerCase() ===
+        applicantName.trim().toLowerCase()
   );
 }
 

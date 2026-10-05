@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Script from "next/script";
 import "./globals.css";
 
 import Navbar from "@/components/Navbar";
@@ -38,6 +39,31 @@ export default function RootLayout({
         </main>
 
         <Footer />
+        <Script
+  id="service-worker-registration"
+  strategy="afterInteractive"
+>
+  {`
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", function () {
+        navigator.serviceWorker
+          .register("/sw.js")
+          .then(function (registration) {
+            console.log(
+              "Service Worker registered:",
+              registration.scope
+            );
+          })
+          .catch(function (error) {
+            console.error(
+              "Service Worker registration failed:",
+              error
+            );
+          });
+      });
+    }
+  `}
+</Script>
       </body>
     </html>
   );

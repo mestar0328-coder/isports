@@ -71,3 +71,17 @@ export const getEventById = (
     events.find((event) => event.id === id) ?? null
   );
 };
+// Compatibility alias
+export const getAllEvents = getEvents;
+
+export const updateEvent = (updatedEvent: SportEvent): void => {
+  if (typeof window === "undefined") return;
+
+  const events = getEvents();
+
+  const updatedEvents = events.map((event) =>
+    event.id === updatedEvent.id ? updatedEvent : event
+  );
+
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedEvents));
+};

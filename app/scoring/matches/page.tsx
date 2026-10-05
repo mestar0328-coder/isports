@@ -2,23 +2,48 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
-import { events } from "@/data/events";
+import { getEvents } from "@/data/events";
 import {
   getMatches,
   saveMatch,
   StoredMatch,
   MatchStatus,
 } from "@/data/matchStorage";
-import {
-  getScores,
-  StoredScore,
-} from "@/data/scoreStorage";
-import {
-  canAccessEvent,
-  isInchargeAuthorized,
-} from "@/data/inchargeAuth";
+import { canAccessEvent } from "@/data/inchargeAuth";
+
+type StoredScore = {
+  matchId: string;
+  scoreA: number;
+  scoreB: number;
+  status: "Draft" | "Submitted" | "Locked";
+  submittedAt?: string | null;
+};
+
+const SCORE_STORAGE_KEY = "isports_scores";
+
+const getScores = (): StoredScore[] => {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  const stored = localStorage.getItem(SCORE_STORAGE_KEY);
+
+  if (!stored) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(stored);
+
+    return Array.isArray(parsed)
+      ? (parsed as StoredScore[])
+      : [];
+  } catch {
+    return [];
+  }
+};
 
 const CORRECTION_TIME = 45 * 60 * 1000;
 
@@ -31,8 +56,15 @@ const teams = [
 
 export default function MatchesPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
-  const assignedEvent = events[0];
+  const eventId = searchParams.get("eventId");
+
+  const [authorized, setAuthorized] =
+    useState(false);
+
+  const [checked, setChecked] =
+    useState(false);
 
   const [matches, setMatches] =
     useState<StoredMatch[]>(() => getMatches());
@@ -41,15 +73,33 @@ export default function MatchesPage() {
     useState<StoredScore[]>(() => getScores());
 
   const [currentTime, setCurrentTime] =
-    useState(0);
+    useState(Date.now());
 
   const [teamA, setTeamA] = useState("");
   const [teamB, setTeamB] = useState("");
   const [date, setDate] = useState("");
 
-  const authorized =
-    isInchargeAuthorized() &&
-    canAccessEvent(assignedEvent.id);
+  const events = getEvents();
+
+  const assignedEvent = eventId
+    ? events.find(
+        (event) => event.id === eventId
+      )
+    : null;
+
+  useEffect(() => {
+    if (!eventId) {
+      setChecked(true);
+      setAuthorized(false);
+      return;
+    }
+
+    const accessAllowed =
+      canAccessEvent(eventId);
+
+    setAuthorized(accessAllowed);
+    setChecked(true);
+  }, [eventId]);
 
   useEffect(() => {
     if (!authorized) {
@@ -126,13 +176,21 @@ export default function MatchesPage() {
     return "border-yellow-800 bg-yellow-950/40 text-yellow-400";
   };
 
-  const eventMatches = matches.filter(
-    (match) =>
-      match.eventId === assignedEvent.id
-  );
+  const eventMatches =
+    eventId
+      ? matches.filter(
+          (match) =>
+            match.eventId === eventId
+        )
+      : [];
 
   const createMatch = () => {
-    if (!authorized) {
+    if (!assignedEvent || !eventId) {
+      alert("No event selected.");
+      return;
+    }
+
+    if (!canAccessEvent(eventId)) {
       alert(
         "You are not authorized to manage this event."
       );
@@ -170,7 +228,7 @@ export default function MatchesPage() {
 
     const newMatch: StoredMatch = {
       id: `match-${Date.now()}`,
-      eventId: assignedEvent.id,
+      eventId,
       teamA,
       teamB,
       date,
@@ -195,9 +253,17 @@ export default function MatchesPage() {
     );
   };
 
-  if (!authorized) {
+  if (!checked) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-gray-950 px-4 py-8 text-white sm:px-6 sm:py-10">
+      <main className="flex min-h-screen items-center justify-center bg-gray-950 text-white">
+        Loading...
+      </main>
+    );
+  }
+
+  if (!authorized || !assignedEvent) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-gray-950 px-4 py-8 text-white">
         <div className="w-full max-w-md rounded-xl border border-red-800 bg-gray-900 p-6 text-center shadow-sm sm:p-8">
 
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-red-800 bg-red-950/40 text-2xl">
@@ -217,10 +283,10 @@ export default function MatchesPage() {
           </p>
 
           <Link
-            href="/scoring"
+            href="/incharge/dashboard"
             className="mt-6 inline-block w-full rounded-lg bg-white px-6 py-3 text-sm font-bold text-black transition hover:bg-gray-200 sm:w-auto"
           >
-            Back to Scoring
+            Back to Dashboard
           </Link>
 
         </div>
@@ -273,7 +339,7 @@ export default function MatchesPage() {
             </div>
 
             <span className="w-fit shrink-0 rounded-full border border-green-800 bg-green-950/40 px-4 py-2 text-xs font-bold text-green-400">
-              Temporary Incharge
+              Authorized
             </span>
 
           </div>
@@ -302,11 +368,11 @@ export default function MatchesPage() {
 
             <div className="rounded-lg border border-gray-800 bg-gray-950 p-4">
               <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-                Access
+                Matches
               </p>
 
-              <p className="mt-2 text-sm font-semibold text-green-400">
-                Authorized
+              <p className="mt-2 text-sm font-semibold text-blue-400">
+                {eventMatches.length}
               </p>
             </div>
 
@@ -334,8 +400,6 @@ export default function MatchesPage() {
 
           <div className="mt-6 grid gap-4 md:grid-cols-3 md:gap-5">
 
-            {/* TEAM A */}
-
             <div>
               <label
                 htmlFor="team-a"
@@ -350,7 +414,7 @@ export default function MatchesPage() {
                 onChange={(e) =>
                   setTeamA(e.target.value)
                 }
-                className="mt-2 w-full rounded-lg border border-gray-700 bg-gray-950 px-4 py-3 text-sm text-white outline-none transition hover:border-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30"
+                className="mt-2 w-full rounded-lg border border-gray-700 bg-gray-950 px-4 py-3 text-sm text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30"
               >
                 <option value="">
                   Select Team
@@ -366,8 +430,6 @@ export default function MatchesPage() {
                 ))}
               </select>
             </div>
-
-            {/* TEAM B */}
 
             <div>
               <label
@@ -383,7 +445,7 @@ export default function MatchesPage() {
                 onChange={(e) =>
                   setTeamB(e.target.value)
                 }
-                className="mt-2 w-full rounded-lg border border-gray-700 bg-gray-950 px-4 py-3 text-sm text-white outline-none transition hover:border-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30"
+                className="mt-2 w-full rounded-lg border border-gray-700 bg-gray-950 px-4 py-3 text-sm text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30"
               >
                 <option value="">
                   Select Team
@@ -400,8 +462,6 @@ export default function MatchesPage() {
               </select>
             </div>
 
-            {/* MATCH DATE */}
-
             <div>
               <label
                 htmlFor="match-date"
@@ -414,20 +474,12 @@ export default function MatchesPage() {
                 id="match-date"
                 type="date"
                 value={date}
-                onChange={(e) => {
-                  const value = e.target.value;
-
-                  if (
-                    /^\d{0,4}-?\d{0,2}-?\d{0,2}$/.test(
-                      value.replaceAll("-", "")
-                    )
-                  ) {
-                    setDate(value);
-                  }
-                }}
+                onChange={(e) =>
+                  setDate(e.target.value)
+                }
                 min="2026-01-01"
                 max="2099-12-31"
-                className="mt-2 w-full rounded-lg border border-gray-700 bg-gray-950 px-4 py-3 text-sm text-white outline-none transition hover:border-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30"
+                className="mt-2 w-full rounded-lg border border-gray-700 bg-gray-950 px-4 py-3 text-sm text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30"
               />
             </div>
 
@@ -510,8 +562,6 @@ export default function MatchesPage() {
 
                     <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
 
-                      {/* MATCH INFORMATION */}
-
                       <div className="min-w-0">
 
                         <div className="flex flex-wrap items-center gap-2">
@@ -551,8 +601,6 @@ export default function MatchesPage() {
                         </div>
 
                       </div>
-
-                      {/* STATUS + ACTION */}
 
                       <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center lg:w-auto">
 
@@ -595,10 +643,10 @@ export default function MatchesPage() {
         <section className="mt-6 sm:mt-8">
 
           <Link
-            href="/scoring"
+            href="/incharge/dashboard"
             className="inline-block w-full rounded-lg border border-gray-700 bg-gray-900 px-6 py-3 text-center text-sm font-semibold text-gray-200 transition hover:border-gray-600 hover:bg-gray-800 sm:w-auto"
           >
-            ← Back to Scoring
+            ← Back to In-Charge Dashboard
           </Link>
 
         </section>

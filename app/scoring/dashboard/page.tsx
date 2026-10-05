@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
-import { events } from "@/data/events";
+import { getEvents } from "@/data/eventsStorage";
 import {
   getMatches,
   StoredMatch,
@@ -12,15 +12,88 @@ import {
   getScores,
   StoredScore,
 } from "@/data/scoreStorage";
+import { getInChargeAccounts } from "@/data/inchargeStorage";
+
+type AssignedEvent = {
+  id: string;
+  name: string;
+  description: string;
+  sport: string;
+  date: string;
+  venue: string;
+};
 
 export default function DashboardPage() {
-  const assignedEvent = events[0];
+  const [assignedEvents, setAssignedEvents] = useState<
+    AssignedEvent[]
+  >([]);
+
+  const [selectedEventId, setSelectedEventId] =
+    useState<string>("");
 
   const [matches, setMatches] = useState<StoredMatch[]>([]);
   const [scores, setScores] = useState<StoredScore[]>([]);
 
   useEffect(() => {
     const loadData = () => {
+      const savedUser =
+        localStorage.getItem("isports_user");
+
+      if (!savedUser) {
+        setAssignedEvents([]);
+        setSelectedEventId("");
+        return;
+      }
+
+      try {
+        const parsedUser = JSON.parse(savedUser);
+
+        if (parsedUser.role !== "incharge") {
+          setAssignedEvents([]);
+          setSelectedEventId("");
+          return;
+        }
+
+        const accounts = getInChargeAccounts();
+
+        const account = accounts.find(
+          (item) =>
+            item.id === parsedUser.accountId ||
+            item.username === parsedUser.username
+        );
+
+        if (!account) {
+          setAssignedEvents([]);
+          setSelectedEventId("");
+          return;
+        }
+
+        const allEvents = getEvents();
+
+        const filteredEvents = allEvents.filter(
+          (event) =>
+            account.assignedEventIds?.includes(event.id)
+        );
+
+        setAssignedEvents(filteredEvents);
+
+        setSelectedEventId((currentId) => {
+          if (
+            currentId &&
+            filteredEvents.some(
+              (event) => event.id === currentId
+            )
+          ) {
+            return currentId;
+          }
+
+          return filteredEvents[0]?.id || "";
+        });
+      } catch {
+        setAssignedEvents([]);
+        setSelectedEventId("");
+      }
+
       setMatches(getMatches());
       setScores(getScores());
     };
@@ -36,12 +109,20 @@ export default function DashboardPage() {
     };
   }, []);
 
-  // Only show matches belonging to the assigned event
-  const eventMatches = matches.filter(
-    (match) => match.eventId === assignedEvent.id
+  const assignedEvent = assignedEvents.find(
+    (event) => event.id === selectedEventId
   );
 
-  // Determine dashboard status from score state
+  // Only show matches belonging to the selected
+  // assigned event.
+  const eventMatches = selectedEventId
+    ? matches.filter(
+        (match) =>
+          match.eventId === selectedEventId
+      )
+    : [];
+
+  // Determine dashboard status from score state.
   const getMatchStatus = (match: StoredMatch) => {
     const score = scores.find(
       (item) => item.matchId === match.id
@@ -64,16 +145,47 @@ export default function DashboardPage() {
   const totalMatches = eventMatches.length;
 
   const completedMatches = eventMatches.filter(
-    (match) => getMatchStatus(match) === "Completed"
+    (match) =>
+      getMatchStatus(match) === "Completed"
   ).length;
 
   const liveMatches = eventMatches.filter(
-    (match) => getMatchStatus(match) === "Live"
+    (match) =>
+      getMatchStatus(match) === "Live"
   ).length;
 
   const upcomingMatches = eventMatches.filter(
-    (match) => getMatchStatus(match) === "Upcoming"
+    (match) =>
+      getMatchStatus(match) === "Upcoming"
   ).length;
+
+  if (!assignedEvent) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-gray-950 px-6 text-white">
+        <div className="w-full max-w-lg rounded-xl border border-gray-800 bg-gray-900 p-8 text-center">
+          <p className="text-sm font-semibold uppercase tracking-widest text-blue-400">
+            iSports Scoring
+          </p>
+
+          <h1 className="mt-3 text-2xl font-bold">
+            No Assigned Event
+          </h1>
+
+          <p className="mt-3 text-sm leading-6 text-gray-400">
+            No event has been assigned to your Match
+            In-Charge account yet.
+          </p>
+
+          <Link
+            href="/incharge/dashboard"
+            className="mt-6 inline-block rounded-lg bg-blue-600 px-5 py-3 text-sm font-bold hover:bg-blue-500"
+          >
+            Back to In-Charge Dashboard
+          </Link>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-gray-950 px-4 py-8 text-white sm:px-6 sm:py-10 lg:px-8 lg:py-12">
@@ -92,7 +204,8 @@ export default function DashboardPage() {
           </h1>
 
           <p className="mt-4 max-w-2xl text-sm leading-6 text-gray-400 sm:text-base sm:leading-7">
-            Monitor your assigned event, match progress and scoring activity.
+            Monitor your assigned event, match progress
+            and scoring activity.
           </p>
 
           <div className="mt-5 inline-flex items-center rounded-full border border-gray-800 bg-gray-900 px-3 py-1.5 text-xs font-semibold text-gray-400">
@@ -101,16 +214,70 @@ export default function DashboardPage() {
 
         </section>
 
-        {/* EVENT INFORMATION */}
+        {/* EVENT SELECTOR */}
 
         <section className="mt-8 rounded-xl border border-gray-800 bg-gray-900 p-5 shadow-sm sm:mt-10 sm:p-7">
+
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-widest text-blue-400 sm:text-sm">
+                Assigned Events
+              </p>
+
+              <h2 className="mt-2 text-xl font-bold sm:text-2xl">
+                Select Event
+              </h2>
+
+              <p className="mt-2 text-sm leading-6 text-gray-500">
+                Statistics and match activity are shown
+                only for your selected assigned event.
+              </p>
+            </div>
+
+            <div className="w-full sm:max-w-sm">
+
+              <label
+                htmlFor="event-selector"
+                className="mb-2 block text-xs font-semibold uppercase tracking-wider text-gray-500"
+              >
+                Event
+              </label>
+
+              <select
+                id="event-selector"
+                value={selectedEventId}
+                onChange={(event) =>
+                  setSelectedEventId(event.target.value)
+                }
+                className="w-full rounded-lg border border-gray-700 bg-gray-950 px-4 py-3 text-sm font-semibold text-white outline-none focus:border-blue-500"
+              >
+                {assignedEvents.map((event) => (
+                  <option
+                    key={event.id}
+                    value={event.id}
+                  >
+                    {event.name}
+                  </option>
+                ))}
+              </select>
+
+            </div>
+
+          </div>
+
+        </section>
+
+        {/* EVENT INFORMATION */}
+
+        <section className="mt-6 rounded-xl border border-gray-800 bg-gray-900 p-5 shadow-sm sm:mt-8 sm:p-7">
 
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
 
             <div className="min-w-0">
 
               <p className="text-xs font-semibold uppercase tracking-widest text-blue-400 sm:text-sm">
-                Assigned Event
+                Selected Assigned Event
               </p>
 
               <h2 className="mt-2 text-2xl font-bold tracking-tight sm:text-3xl">
@@ -254,7 +421,8 @@ export default function DashboardPage() {
             </div>
 
             <p className="text-sm font-semibold text-gray-400">
-              {totalMatches} {totalMatches === 1 ? "match" : "matches"}
+              {totalMatches}{" "}
+              {totalMatches === 1 ? "match" : "matches"}
             </p>
 
           </div>
@@ -348,14 +516,14 @@ export default function DashboardPage() {
             </h2>
 
             <p className="mt-2 text-sm leading-6 text-gray-500">
-              Quickly access the main scoring and tournament sections.
+              Quickly access the main scoring and tournament sections for the selected event.
             </p>
           </div>
 
           <div className="mt-6 grid gap-4 sm:grid-cols-2">
 
             <Link
-              href="/scoring/matches"
+              href={`/scoring/matches?eventId=${selectedEventId}`}
               className="group rounded-xl border border-gray-800 bg-gray-950 p-5 transition hover:border-gray-700 hover:bg-gray-900 sm:p-6"
             >
               <div className="flex items-center justify-between gap-3">
@@ -369,12 +537,12 @@ export default function DashboardPage() {
               </div>
 
               <p className="mt-2 text-sm leading-6 text-gray-400">
-                Create and manage tournament matches.
+                Create and manage matches for this event.
               </p>
             </Link>
 
             <Link
-              href="/scoring/scoreboard"
+              href={`/scoring/scoreboard?eventId=${selectedEventId}`}
               className="group rounded-xl border border-gray-800 bg-gray-950 p-5 transition hover:border-gray-700 hover:bg-gray-900 sm:p-6"
             >
               <div className="flex items-center justify-between gap-3">
@@ -388,12 +556,12 @@ export default function DashboardPage() {
               </div>
 
               <p className="mt-2 text-sm leading-6 text-gray-400">
-                View current match scores.
+                View current scores for this event.
               </p>
             </Link>
 
             <Link
-              href="/scoring/public-results"
+              href={`/scoring/public-results?eventId=${selectedEventId}`}
               className="group rounded-xl border border-gray-800 bg-gray-950 p-5 transition hover:border-gray-700 hover:bg-gray-900 sm:p-6"
             >
               <div className="flex items-center justify-between gap-3">
@@ -407,12 +575,12 @@ export default function DashboardPage() {
               </div>
 
               <p className="mt-2 text-sm leading-6 text-gray-400">
-                View official match results.
+                View official results for this event.
               </p>
             </Link>
 
             <Link
-              href="/scoring/standings"
+              href={`/scoring/standings?eventId=${selectedEventId}`}
               className="group rounded-xl border border-gray-800 bg-gray-950 p-5 transition hover:border-gray-700 hover:bg-gray-900 sm:p-6"
             >
               <div className="flex items-center justify-between gap-3">
@@ -426,7 +594,26 @@ export default function DashboardPage() {
               </div>
 
               <p className="mt-2 text-sm leading-6 text-gray-400">
-                View team rankings and points.
+                View team rankings and points for this event.
+              </p>
+            </Link>
+
+            <Link
+              href={`/scoring/brackets?eventId=${selectedEventId}`}
+              className="group rounded-xl border border-gray-800 bg-gray-950 p-5 transition hover:border-gray-700 hover:bg-gray-900 sm:p-6"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="font-bold">
+                  Brackets
+                </h3>
+
+                <span className="text-gray-500 transition group-hover:translate-x-1">
+                  →
+                </span>
+              </div>
+
+              <p className="mt-2 text-sm leading-6 text-gray-400">
+                View the tournament bracket for this event.
               </p>
             </Link>
 

@@ -45,3 +45,13 @@ export function isRegistered(eventId: string): boolean {
       registration.eventId === eventId
   );
 }
+
+// Get all registrations for one event
+export function getRegistrationsByEvent(
+  eventId: string
+): Registration[] {
+  return getRegistrations().filter(
+    (registration) =>
+      registration.eventId === eventId
+  );
+}

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 
-import { events } from "@/data/events";
+import { getEvents } from "@/data/eventsStorage";
 import {
   getMatches,
   StoredMatch,
@@ -25,8 +25,6 @@ const CORRECTION_TIME = 45 * 60 * 1000;
 export default function ScoreEntryPage() {
   const params = useParams();
   const matchId = params.id as string;
-
-  const assignedEvent = events[0];
 
   const [match, setMatch] =
     useState<StoredMatch | null>(null);
@@ -49,7 +47,21 @@ export default function ScoreEntryPage() {
   const [loading, setLoading] =
     useState(true);
 
+  const events = getEvents();
+
+  // --------------------------------------------------
+  // FIND EVENT BELONGING TO THIS MATCH
+  // --------------------------------------------------
+
+  const assignedEvent = match
+    ? events.find(
+        (event) => event.id === match.eventId
+      )
+    : null;
+
   const authorized =
+    !!match &&
+    !!assignedEvent &&
     isInchargeAuthorized() &&
     canAccessEvent(assignedEvent.id);
 
@@ -86,10 +98,10 @@ export default function ScoreEntryPage() {
           String(savedScore.scoreB)
         );
 
-        if (savedScore.submittedAt) {
+        if (savedScore.updatedAt) {
           setSubmittedAt(
             new Date(
-              savedScore.submittedAt
+              savedScore.updatedAt
             ).getTime()
           );
         }
@@ -257,11 +269,11 @@ export default function ScoreEntryPage() {
       scoreA: Number(teamAScore),
       scoreB: Number(teamBScore),
       status: "Draft",
-      submittedAt: submittedAt
+      updatedAt: submittedAt
         ? new Date(
             submittedAt
           ).toISOString()
-        : undefined,
+        : new Date().toISOString(),
     };
 
     saveScore(savedScore);
@@ -307,7 +319,7 @@ export default function ScoreEntryPage() {
       scoreA: Number(teamAScore),
       scoreB: Number(teamBScore),
       status: "Submitted",
-      submittedAt: submissionTime,
+      updatedAt: submissionTime,
     };
 
     saveScore(submittedScore);
@@ -371,7 +383,7 @@ export default function ScoreEntryPage() {
       scoreA: Number(teamAScore),
       scoreB: Number(teamBScore),
       status: "Submitted",
-      submittedAt: score.submittedAt,
+      updatedAt: score.updatedAt,
     };
 
     saveScore(correctedScore);
@@ -390,10 +402,67 @@ export default function ScoreEntryPage() {
   };
 
   // --------------------------------------------------
+  // LOADING
+  // --------------------------------------------------
+
+  if (loading) {
+    return (
+      <main className="min-h-screen bg-gray-950 px-4 py-8 text-white sm:px-6 sm:py-10 lg:px-8 lg:py-12">
+        <div className="mx-auto max-w-5xl">
+          <div className="rounded-xl border border-gray-800 bg-gray-900 p-6 sm:p-8">
+            <p className="text-sm font-semibold text-gray-300">
+              Loading match...
+            </p>
+
+            <p className="mt-2 text-sm text-gray-500">
+              Please wait while the match information is loaded.
+            </p>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  // --------------------------------------------------
+  // MATCH NOT FOUND
+  // --------------------------------------------------
+
+  if (!match) {
+    return (
+      <main className="min-h-screen bg-gray-950 px-4 py-8 text-white sm:px-6 sm:py-10 lg:px-8 lg:py-12">
+        <div className="mx-auto max-w-5xl">
+          <div className="rounded-xl border border-red-800 bg-gray-900 p-6 text-center shadow-sm sm:p-8">
+
+            <p className="text-xs font-semibold uppercase tracking-widest text-blue-400">
+              iSports Scoring
+            </p>
+
+            <h1 className="mt-3 text-2xl font-bold sm:text-3xl">
+              Match Not Found
+            </h1>
+
+            <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-gray-400">
+              The requested match could not be found.
+            </p>
+
+            <Link
+              href="/incharge/dashboard"
+              className="mt-6 inline-block w-full rounded-lg bg-white px-6 py-3 text-sm font-bold text-black transition hover:bg-gray-200 sm:w-auto"
+            >
+              Back to Dashboard
+            </Link>
+
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  // --------------------------------------------------
   // ACCESS DENIED
   // --------------------------------------------------
 
-  if (!authorized) {
+  if (!authorized || !assignedEvent) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-gray-950 px-4 py-8 text-white sm:px-6 sm:py-10">
         <div className="w-full max-w-md rounded-xl border border-red-800 bg-gray-900 p-6 text-center shadow-sm sm:p-8">
@@ -415,72 +484,11 @@ export default function ScoreEntryPage() {
           </p>
 
           <Link
-            href="/scoring/matches"
+            href={`/scoring/matches?eventId=${match.eventId}`}
             className="mt-6 inline-block w-full rounded-lg bg-white px-6 py-3 text-sm font-bold text-black transition hover:bg-gray-200 sm:w-auto"
           >
             Back to Matches
           </Link>
-
-        </div>
-      </main>
-    );
-  }
-
-  // --------------------------------------------------
-  // LOADING
-  // --------------------------------------------------
-
-  if (loading) {
-    return (
-      <main className="min-h-screen bg-gray-950 px-4 py-8 text-white sm:px-6 sm:py-10 lg:px-8 lg:py-12">
-        <div className="mx-auto max-w-5xl">
-
-          <div className="rounded-xl border border-gray-800 bg-gray-900 p-6 sm:p-8">
-            <p className="text-sm font-semibold text-gray-300">
-              Loading match...
-            </p>
-
-            <p className="mt-2 text-sm text-gray-500">
-              Please wait while the match information is loaded.
-            </p>
-          </div>
-
-        </div>
-      </main>
-    );
-  }
-
-  // --------------------------------------------------
-  // MATCH NOT FOUND
-  // --------------------------------------------------
-
-  if (!match) {
-    return (
-      <main className="min-h-screen bg-gray-950 px-4 py-8 text-white sm:px-6 sm:py-10 lg:px-8 lg:py-12">
-        <div className="mx-auto max-w-5xl">
-
-          <div className="rounded-xl border border-red-800 bg-gray-900 p-6 text-center shadow-sm sm:p-8">
-
-            <p className="text-xs font-semibold uppercase tracking-widest text-blue-400">
-              iSports Scoring
-            </p>
-
-            <h1 className="mt-3 text-2xl font-bold sm:text-3xl">
-              Match Not Found
-            </h1>
-
-            <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-gray-400">
-              The requested match could not be found.
-            </p>
-
-            <Link
-              href="/scoring/matches"
-              className="mt-6 inline-block w-full rounded-lg bg-white px-6 py-3 text-sm font-bold text-black transition hover:bg-gray-200 sm:w-auto"
-            >
-              Back to Matches
-            </Link>
-
-          </div>
 
         </div>
       </main>
@@ -762,7 +770,6 @@ export default function ScoreEntryPage() {
                 </label>
 
               </div>
-
               <input
                 id="team-b-score"
                 type="number"
@@ -774,7 +781,8 @@ export default function ScoreEntryPage() {
                   const value =
                     e.target.value;
 
-                  if (/^\d*$/.test(value)) {setTeamBScore(value);
+                  if (/^\d*$/.test(value)) {
+                    setTeamBScore(value);
                   }
                 }}
                 className="mt-5 w-full rounded-xl border border-gray-700 bg-gray-900 px-4 py-5 text-center text-4xl font-bold text-white outline-none transition hover:border-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30 disabled:cursor-not-allowed disabled:opacity-50 sm:text-5xl"
@@ -864,8 +872,6 @@ export default function ScoreEntryPage() {
 
             <div className="mt-6 grid gap-4 sm:grid-cols-2 sm:gap-6">
 
-              {/* TEAM A SCORE */}
-
               <div className="rounded-xl border border-gray-800 bg-gray-950 p-5 text-center sm:p-6">
 
                 <p className="break-words text-sm font-semibold text-gray-400 sm:text-base">
@@ -877,8 +883,6 @@ export default function ScoreEntryPage() {
                 </p>
 
               </div>
-
-              {/* TEAM B SCORE */}
 
               <div className="rounded-xl border border-gray-800 bg-gray-950 p-5 text-center sm:p-6">
 
@@ -917,7 +921,7 @@ export default function ScoreEntryPage() {
         <div className="mt-6 flex flex-col gap-3 pb-6 sm:mt-8 sm:flex-row sm:justify-between sm:pb-8">
 
           <Link
-            href="/scoring/matches"
+            href={`/scoring/matches?eventId=${match.eventId}`}
             className="w-full rounded-xl border border-gray-700 bg-gray-900 px-5 py-3.5 text-center text-sm font-bold text-gray-200 transition hover:border-gray-600 hover:bg-gray-800 sm:w-auto"
           >
             ← Back to Matches
