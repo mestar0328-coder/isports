@@ -155,10 +155,10 @@ export default function BracketsPage() {
         changed = true;
 
         return {
-          ...bracketMatch,
-          status: "Completed",
-          winner,
-        };
+...bracketMatch,
+status: "Completed" as const,
+winner,
+};
       }
     );
 
