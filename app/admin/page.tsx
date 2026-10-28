@@ -186,9 +186,30 @@ export default function AdminPage() {
               Manage Events
             </button>
 
+            <Link
+              href="/admin/incharges"
+              className="rounded-lg bg-purple-600 px-5 py-3 font-semibold text-white hover:bg-purple-500"
+            >
+              Manage Match In-Charges
+            </Link>
+
+            <Link
+              href="/admin/audit"
+              className="rounded-lg bg-purple-600 px-4 py-2 font-semibold hover:bg-purple-500"
+            >
+              Score Audit Log
+            </Link>
+
+            <Link
+              href="/admin/audit/alerts"
+              className="rounded-lg border border-red-500 bg-red-50 px-4 py-2 font-semibold text-red-700 hover:bg-red-100"
+            >
+              Alert Management
+            </Link>
+
             <button
               type="button"
-              onClick={() => router.push("/admin/events/new")}
+              onClick={() => router.push("/admin/event/new")}
               className="rounded-lg border border-blue-500 px-5 py-3 font-semibold text-blue-400 hover:bg-blue-500 hover:text-white"
             >
               Create Event
@@ -365,9 +386,3 @@ export default function AdminPage() {
     </main>
   );
 }
-<Link
-  href="/admin/incharges"
-  className="rounded-lg bg-purple-600 px-4 py-2 font-semibold hover:bg-purple-500"
->
-  Manage Match In-Charges
-</Link>

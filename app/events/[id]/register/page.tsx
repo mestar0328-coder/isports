@@ -3,11 +3,9 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { getEvents } from "@/data/eventsStorage";
-import { 
-  addRegistration,
-  hasRegistered,
-} from "@/data/registrationStorage";
+import { addRegistration, hasRegistered } from "@/data/registrationStorage";
 import type { Registration } from "@/data/registrations";
+import type { SportEvent } from "@/types/events";
 
 export default function RegisterPage() {
   const params = useParams();
@@ -21,92 +19,75 @@ export default function RegisterPage() {
   const [teamName, setTeamName] = useState("");
   const [teamMembers, setTeamMembers] = useState<string[]>([]);
   const [successMessage, setSuccessMessage] = useState("");
+  const [authChecking, setAuthChecking] = useState(true);
+  const [authorized, setAuthorized] = useState(false);
+  const [event, setEvent] = useState<SportEvent | null>(null);
+  const [eventLoading, setEventLoading] = useState(true);
 
+  // Allow only logged-in students to access registration.
+  useEffect(() => {
+    try {
+      const storedUser = localStorage.getItem("isports_user");
+
+      if (!storedUser) {
+        router.replace(
+          `/student/login?redirect=${encodeURIComponent(
+            window.location.pathname
+          )}`
+        );
+        return;
+      }
+
+      const user = JSON.parse(storedUser);
+
+      if (user?.role !== "student") {
+        router.replace(
+          `/student/login?redirect=${encodeURIComponent(
+            window.location.pathname
+          )}`
+        );
+        return;
+      }
+
+      setAuthorized(true);
+    } catch {
+      localStorage.removeItem("isports_user");
+      router.replace(
+        `/student/login?redirect=${encodeURIComponent(
+          window.location.pathname
+        )}`
+      );
+    } finally {
+      setAuthChecking(false);
+    }
+  }, [router]);
+
+  // Load the event after obtaining its route ID.
   useEffect(() => {
     const paramValues = Object.values(params ?? {});
     const id = String(paramValues[0] ?? "").trim();
 
     setEventId(id);
+
+    if (!id) {
+      setEvent(null);
+      setEventLoading(false);
+      return;
+    }
+
+    const foundEvent = getEvents().find(
+      (item) => String(item.id).trim() === id
+    );
+
+    setEvent(foundEvent ?? null);
+    setEventLoading(false);
   }, [params]);
 
-  const event = getEvents().find(
-    (item) => String(item.id).trim() === eventId
-  );
-
-  if (!event) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-gray-950 px-4 text-white">
-        <div className="w-full max-w-md rounded-xl border border-gray-800 bg-gray-900 p-6 text-center shadow-sm sm:p-8">
-          <p className="text-sm font-semibold uppercase tracking-widest text-blue-400">
-            iSports Registration
-          </p>
-
-          <h1 className="mt-3 text-2xl font-bold sm:text-3xl">
-            Event Not Found
-          </h1>
-
-          <p className="mt-3 text-sm leading-6 text-gray-400">
-            The event you are trying to register for does not exist.
-          </p>
-
-          <button
-            type="button"
-            onClick={() => router.push("/events")}
-            className="mt-6 w-full rounded-lg bg-white px-5 py-3 text-sm font-bold text-black transition hover:bg-gray-200 sm:w-auto"
-          >
-            Back to Events
-          </button>
-        </div>
-      </main>
-    );
-  }
-
-  const registrationOpen =
-    new Date(event.registrationDeadline) >= new Date();
-
-  if (!registrationOpen) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-gray-950 px-4 text-white">
-        <div className="w-full max-w-md rounded-xl border border-gray-800 bg-gray-900 p-6 text-center shadow-sm sm:p-8">
-          <p className="text-sm font-semibold uppercase tracking-widest text-red-400">
-            iSports Registration
-          </p>
-
-          <h1 className="mt-3 text-2xl font-bold sm:text-3xl">
-            Registration Closed
-          </h1>
-
-          <p className="mt-3 text-sm leading-6 text-gray-400">
-            The registration deadline for this event has passed.
-          </p>
-
-          <p className="mt-2 text-sm text-gray-500">
-            Deadline: {event.registrationDeadline}
-          </p>
-
-          <button
-            type="button"
-            onClick={() => router.push("/events")}
-            className="mt-6 w-full rounded-lg bg-white px-5 py-3 text-sm font-bold text-black transition hover:bg-gray-200 sm:w-auto"
-          >
-            Back to Events
-          </button>
-        </div>
-      </main>
-    );
-  }
-
   const addTeamMember = () => {
-    setTeamMembers((currentMembers) => [
-      ...currentMembers,
-      "",
-    ]);
+    setTeamMembers((currentMembers) => [...currentMembers, ""]);
   };
 
-  const updateTeamMember = (
-    index: number,
-    value: string
-  ) => {
+  const updateTeamMember = (index: number, value: string) => {
     setTeamMembers((currentMembers) => {
       const updatedMembers = [...currentMembers];
       updatedMembers[index] = value;
@@ -116,13 +97,13 @@ export default function RegisterPage() {
 
   const removeTeamMember = (index: number) => {
     setTeamMembers((currentMembers) =>
-      currentMembers.filter(
-        (_, memberIndex) => memberIndex !== index
-      )
+      currentMembers.filter((_, memberIndex) => memberIndex !== index)
     );
   };
 
   const checkEligibility = () => {
+    if (!event) return false;
+
     const studentAge = Number(age);
 
     if (!applicantName.trim()) {
@@ -130,7 +111,7 @@ export default function RegisterPage() {
       return false;
     }
 
-    if (!age.trim() || studentAge <= 0) {
+    if (!age.trim() || !Number.isFinite(studentAge) || studentAge <= 0) {
       alert("Please enter a valid age.");
       return false;
     }
@@ -145,23 +126,13 @@ export default function RegisterPage() {
       return false;
     }
 
-    if (
-      event.minAge !== undefined &&
-      studentAge < event.minAge
-    ) {
-      alert(
-        `You are not eligible. Minimum age is ${event.minAge}.`
-      );
+    if (event.minAge !== undefined && studentAge < event.minAge) {
+      alert(`You are not eligible. Minimum age is ${event.minAge}.`);
       return false;
     }
 
-    if (
-      event.maxAge !== undefined &&
-      studentAge > event.maxAge
-    ) {
-      alert(
-        `You are not eligible. Maximum age is ${event.maxAge}.`
-      );
+    if (event.maxAge !== undefined && studentAge > event.maxAge) {
+      alert(`You are not eligible. Maximum age is ${event.maxAge}.`);
       return false;
     }
 
@@ -169,16 +140,30 @@ export default function RegisterPage() {
   };
 
   const submitRegistration = () => {
-  if (!checkEligibility()) {
-    return;
-  }
+    if (!event) return;
 
-  if (hasRegistered(applicantName, event.id)) {
-    alert(
-      "You have already registered for this event."
-    );
-    return;
-  }
+    // Recheck the local student role before submitting.
+    try {
+      const storedUser = localStorage.getItem("isports_user");
+      const user = storedUser ? JSON.parse(storedUser) : null;
+
+      if (user?.role !== "student") {
+        alert("Please log in with your student account to register.");
+        router.replace("/student/login");
+        return;
+      }
+    } catch {
+      localStorage.removeItem("isports_user");
+      router.replace("/student/login");
+      return;
+    }
+
+    if (!checkEligibility()) return;
+
+    if (hasRegistered(applicantName.trim(), event.id)) {
+      alert("You have already registered for this event.");
+      return;
+    }
 
     if (event.registrationType === "team") {
       if (!teamName.trim()) {
@@ -190,15 +175,10 @@ export default function RegisterPage() {
         (member) => member.trim() !== ""
       );
 
-      const requiredMembers = Math.max(
-        (event.teamSize || 1) - 1,
-        0
-      );
+      const requiredMembers = Math.max((event.teamSize || 1) - 1, 0);
 
       if (validMembers.length < requiredMembers) {
-        alert(
-          `Please add ${requiredMembers} team members.`
-        );
+        alert(`Please add ${requiredMembers} team members.`);
         return;
       }
 
@@ -213,17 +193,15 @@ export default function RegisterPage() {
         teamName: teamName.trim(),
         teamMembers: [
           applicantName.trim(),
-          ...validMembers,
+          ...validMembers.map((member) => member.trim()),
         ],
         registeredAt: new Date().toLocaleDateString(),
       };
 
       addRegistration(newRegistration);
-
       setSuccessMessage(
         "Eligible! Team registration submitted successfully."
       );
-
       return;
     }
 
@@ -239,11 +217,74 @@ export default function RegisterPage() {
     };
 
     addRegistration(newRegistration);
-
-    setSuccessMessage(
-      "Eligible! Registration submitted successfully."
-    );
+    setSuccessMessage("Eligible! Registration submitted successfully.");
   };
+
+  if (authChecking || !authorized || eventLoading) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-gray-950 px-4 text-white">
+        <p className="text-gray-300">Checking access and loading event...</p>
+      </main>
+    );
+  }
+
+  if (!event) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-gray-950 px-4 text-white">
+        <div className="w-full max-w-md rounded-xl border border-gray-800 bg-gray-900 p-6 text-center shadow-sm sm:p-8">
+          <p className="text-sm font-semibold uppercase tracking-widest text-blue-400">
+            iSports Registration
+          </p>
+          <h1 className="mt-3 text-2xl font-bold sm:text-3xl">
+            Event Not Found
+          </h1>
+          <p className="mt-3 text-sm leading-6 text-gray-400">
+            The event you are trying to register for does not exist.
+          </p>
+          <button
+            type="button"
+            onClick={() => router.push("/events")}
+            className="mt-6 w-full rounded-lg bg-white px-5 py-3 text-sm font-bold text-black transition hover:bg-gray-200 sm:w-auto"
+          >
+            Back to Events
+          </button>
+        </div>
+      </main>
+    );
+  }
+
+  const deadlineDate = new Date(event.registrationDeadline);
+  const registrationOpen =
+    !Number.isNaN(deadlineDate.getTime()) &&
+    deadlineDate >= new Date();
+
+  if (!registrationOpen) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-gray-950 px-4 text-white">
+        <div className="w-full max-w-md rounded-xl border border-gray-800 bg-gray-900 p-6 text-center shadow-sm sm:p-8">
+          <p className="text-sm font-semibold uppercase tracking-widest text-red-400">
+            iSports Registration
+          </p>
+          <h1 className="mt-3 text-2xl font-bold sm:text-3xl">
+            Registration Closed
+          </h1>
+          <p className="mt-3 text-sm leading-6 text-gray-400">
+            The registration deadline for this event has passed or is invalid.
+          </p>
+          <p className="mt-2 text-sm text-gray-500">
+            Deadline: {event.registrationDeadline}
+          </p>
+          <button
+            type="button"
+            onClick={() => router.push("/events")}
+            className="mt-6 w-full rounded-lg bg-white px-5 py-3 text-sm font-bold text-black transition hover:bg-gray-200 sm:w-auto"
+          >
+            Back to Events
+          </button>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-gray-950 px-4 py-8 text-white sm:px-6 sm:py-10 lg:px-8 lg:py-12">
@@ -260,7 +301,6 @@ export default function RegisterPage() {
           <p className="text-sm font-semibold uppercase tracking-widest text-blue-400">
             iSports Registration
           </p>
-
           <h1 className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
             Register for {event.name}
           </h1>
@@ -271,7 +311,6 @@ export default function RegisterPage() {
                 ? "Team Registration"
                 : "Individual Registration"}
             </span>
-
             <span className="rounded-full border border-blue-800 bg-blue-950/30 px-3 py-1.5 text-xs font-semibold text-blue-400">
               {event.sport}
             </span>
@@ -279,40 +318,30 @@ export default function RegisterPage() {
 
           <div className="mt-5 grid gap-3 text-sm text-gray-400 sm:grid-cols-2">
             <p>
-              <span className="font-semibold text-gray-200">
-                Event Date:
-              </span>{" "}
+              <span className="font-semibold text-gray-200">Event Date:</span>{" "}
               {event.date}
             </p>
-
             <p>
-              <span className="font-semibold text-gray-200">
-                Venue:
-              </span>{" "}
+              <span className="font-semibold text-gray-200">Venue:</span>{" "}
               {event.venue}
             </p>
-
             <p>
-              <span className="font-semibold text-gray-200">
-                Deadline:
-              </span>{" "}
+              <span className="font-semibold text-gray-200">Deadline:</span>{" "}
               {event.registrationDeadline}
             </p>
-
-            {event.registrationType === "team" &&
-              event.teamSize && (
-                <p>
-                  <span className="font-semibold text-gray-200">
-                    Required Team Size:
-                  </span>{" "}
-                  {event.teamSize}
-                </p>
-              )}
+            {event.registrationType === "team" && event.teamSize && (
+              <p>
+                <span className="font-semibold text-gray-200">
+                  Required Team Size:
+                </span>{" "}
+                {event.teamSize}
+              </p>
+            )}
           </div>
 
           <p className="mt-4 max-w-2xl text-sm leading-6 text-gray-400 sm:text-base">
-            Enter your details below to check eligibility and
-            submit your registration.
+            Enter your details below to check eligibility and submit your
+            registration.
           </p>
         </section>
 
@@ -323,16 +352,13 @@ export default function RegisterPage() {
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-green-900 text-sm font-bold text-green-400">
                   ✓
                 </div>
-
                 <div>
                   <h2 className="text-xl font-bold text-green-400 sm:text-2xl">
                     Registration Successful
                   </h2>
-
                   <p className="mt-2 text-sm leading-6 text-green-300">
                     {successMessage}
                   </p>
-
                   <p className="mt-3 text-sm text-gray-400">
                     Your registration status is currently Pending.
                   </p>
@@ -348,7 +374,6 @@ export default function RegisterPage() {
               >
                 Back to Events
               </button>
-
               <button
                 type="button"
                 onClick={() => router.push("/registrations")}
@@ -364,11 +389,9 @@ export default function RegisterPage() {
               <p className="text-xs font-semibold uppercase tracking-wider text-blue-400">
                 Step 1
               </p>
-
               <h2 className="mt-2 text-xl font-bold sm:text-2xl">
                 Applicant Information
               </h2>
-
               <p className="mt-2 text-sm leading-6 text-gray-500">
                 Provide your basic information for registration.
               </p>
@@ -382,14 +405,11 @@ export default function RegisterPage() {
                 >
                   Your Name
                 </label>
-
                 <input
                   id="applicantName"
                   required
                   value={applicantName}
-                  onChange={(e) =>
-                    setApplicantName(e.target.value)
-                  }
+                  onChange={(e) => setApplicantName(e.target.value)}
                   className="mt-2 w-full rounded-lg border border-gray-700 bg-gray-950 px-4 py-3 text-sm text-white outline-none placeholder:text-gray-600 focus:border-gray-500 focus:ring-1 focus:ring-gray-500"
                   placeholder="Enter your full name"
                 />
@@ -402,7 +422,6 @@ export default function RegisterPage() {
                 >
                   Age
                 </label>
-
                 <input
                   id="age"
                   required
@@ -423,7 +442,6 @@ export default function RegisterPage() {
                 >
                   College Name
                 </label>
-
                 <input
                   id="college"
                   required
@@ -438,20 +456,15 @@ export default function RegisterPage() {
                 <input
                   type="checkbox"
                   checked={hasCollegeId}
-                  onChange={(e) =>
-                    setHasCollegeId(e.target.checked)
-                  }
+                  onChange={(e) => setHasCollegeId(e.target.checked)}
                   className="mt-0.5 h-4 w-4 shrink-0 accent-white"
                 />
-
                 <span>
                   <span className="block text-sm font-semibold text-gray-200">
                     I have a valid college ID
                   </span>
-
                   <span className="mt-1 block text-xs leading-5 text-gray-500">
-                    You must confirm this before submitting your
-                    registration.
+                    You must confirm this before submitting your registration.
                   </span>
                 </span>
               </label>
@@ -462,11 +475,9 @@ export default function RegisterPage() {
                 <p className="text-xs font-semibold uppercase tracking-wider text-blue-400">
                   Step 2
                 </p>
-
                 <h2 className="mt-2 text-xl font-bold sm:text-2xl">
                   Team Details
                 </h2>
-
                 <p className="mt-2 text-sm leading-6 text-gray-500">
                   Enter your team name and add the required team members.
                 </p>
@@ -478,13 +489,10 @@ export default function RegisterPage() {
                   >
                     Team Name
                   </label>
-
                   <input
                     id="teamName"
                     value={teamName}
-                    onChange={(e) =>
-                      setTeamName(e.target.value)
-                    }
+                    onChange={(e) => setTeamName(e.target.value)}
                     placeholder="Enter team name"
                     className="mt-2 w-full rounded-lg border border-gray-700 bg-gray-950 px-4 py-3 text-sm text-white outline-none placeholder:text-gray-600 focus:border-gray-500 focus:ring-1 focus:ring-gray-500"
                   />
@@ -494,12 +502,10 @@ export default function RegisterPage() {
                       <p className="text-sm font-semibold text-gray-200">
                         Team Members
                       </p>
-
                       <p className="mt-1 text-xs text-gray-500">
                         Add the other members of your team.
                       </p>
                     </div>
-
                     <button
                       type="button"
                       onClick={addTeamMember}
@@ -518,15 +524,11 @@ export default function RegisterPage() {
                         <input
                           value={member}
                           onChange={(e) =>
-                            updateTeamMember(
-                              index,
-                              e.target.value
-                            )
+                            updateTeamMember(index, e.target.value)
                           }
                           placeholder={`Team Member ${index + 2}`}
                           className="w-full rounded-lg border border-gray-700 bg-gray-900 px-4 py-3 text-sm text-white outline-none placeholder:text-gray-600 focus:border-gray-500 focus:ring-1 focus:ring-gray-500 sm:flex-1"
                         />
-
                         <button
                           type="button"
                           onClick={() => removeTeamMember(index)}
@@ -546,13 +548,11 @@ export default function RegisterPage() {
                 <p className="text-sm font-semibold text-gray-200">
                   Ready to register?
                 </p>
-
                 <p className="mt-1 text-xs leading-5 text-gray-500">
-                  Your eligibility will be checked before the registration
-                  is submitted.
+                  Your eligibility will be checked before the registration is
+                  submitted.
                 </p>
               </div>
-
               <button
                 type="button"
                 onClick={submitRegistration}

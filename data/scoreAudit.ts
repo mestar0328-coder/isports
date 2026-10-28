@@ -44,7 +44,7 @@ export function addScoreAudit(
     matchId,
     action,
     performedBy,
-    timestamp: new Date().toLocaleString(),
+    timestamp: new Date().toISOString(),
   };
 
   localStorage.setItem(

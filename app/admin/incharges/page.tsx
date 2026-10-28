@@ -87,15 +87,43 @@ export default function InChargesPage() {
       return;
     }
 
+    const normalizedUsername =
+      username.trim().toLowerCase();
+
+    const usernameExists = accounts.some(
+      (account) =>
+        account.username.trim().toLowerCase() ===
+        normalizedUsername
+    );
+
+    if (usernameExists) {
+      alert(
+        "This username already exists. Please choose another username."
+      );
+      return;
+    }
+
+    const expiryDate = new Date(
+      `${expiresAt}T23:59:59`
+    );
+
+    if (expiryDate.getTime() < Date.now()) {
+      alert(
+        "Expiry date must be today or a future date."
+      );
+      return;
+    }
+
     const newAccount: InChargeAccount = {
       id: crypto.randomUUID(),
       name: name.trim(),
-      username: username.trim(),
+      username: normalizedUsername,
       password,
       assignedSport:
         assignedSport.trim(),
       assignedEventIds: [],
-      expiresAt,
+      expiresAt:
+        expiryDate.toISOString(),
       isActive: true,
       createdAt:
         new Date().toISOString(),
@@ -153,6 +181,31 @@ export default function InChargesPage() {
 
       return updated;
     });
+  }
+
+  function handleToggleAccount(
+    account: InChargeAccount
+  ) {
+    const newStatus =
+      !account.isActive;
+
+    updateInChargeAccount(
+      account.id,
+      {
+        isActive: newStatus,
+      }
+    );
+
+    const updatedAccounts =
+      getInChargeAccounts();
+
+    setAccounts(updatedAccounts);
+
+    alert(
+      newStatus
+        ? `${account.name} account activated.`
+        : `${account.name} account deactivated.`
+    );
   }
 
   function handleEventToggle(
@@ -402,17 +455,41 @@ export default function InChargesPage() {
 
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleDeleteAccount(
-                            account.id
-                          )
-                        }
-                        className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold transition hover:bg-red-500"
-                      >
-                        Delete
-                      </button>
+                      {/* ACCOUNT ACTIONS */}
+
+                      <div className="flex flex-wrap gap-2">
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleToggleAccount(
+                              account
+                            )
+                          }
+                          className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                            account.isActive
+                              ? "bg-yellow-600 hover:bg-yellow-500"
+                              : "bg-green-600 hover:bg-green-500"
+                          }`}
+                        >
+                          {account.isActive
+                            ? "Deactivate"
+                            : "Activate"}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleDeleteAccount(
+                              account.id
+                            )
+                          }
+                          className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold transition hover:bg-red-500"
+                        >
+                          Delete
+                        </button>
+
+                      </div>
 
                     </div>
 

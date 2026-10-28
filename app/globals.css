@@ -1,26 +1,166 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+/* ========================================
+iSports — Professional Sports Theme
+FIFA-inspired blue and white design
+======================================== */
 
 :root {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+color-scheme: light;
+
+--background: #f4f7fb;
+--foreground: #172033;
+
+--color-background: var(--background);
+--color-foreground: var(--foreground);
+
+--font-sans: var(--font-geist-sans);
+--font-mono: var(--font-geist-mono);
+
+/* Brand Colors */
+--isports-primary: #1768e5;
+--isports-primary-hover: #1254bd;
+--isports-navy: #101e40;
+--isports-surface: #ffffff;
+--isports-card: #ffffff;
+--isports-card-hover: #f0f5ff;
+--isports-border: #dce4ef;
+
+/* Status Colors */
+--isports-success: #16803d;
+--isports-warning: #b45309;
+--isports-danger: #dc2626;
+
+/* Text Colors */
+--isports-text-primary: #172033;
+--isports-text-secondary: #475569;
+--isports-text-muted: #64748b;
+
+/* Additional Theme Tokens */
+--isports-primary-light: #e8f0ff;
+--isports-header: #101e40;
+--isports-input-bg: #ffffff;
+--isports-focus: #1768e5;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* Base Page Styling */
+
+html {
+min-height: 100%;
+background: var(--background);
+scroll-behavior: smooth;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+min-height: 100vh;
+margin: 0;
+background: var(--background);
+color: var(--foreground);
+font-family: Arial, Helvetica, sans-serif;
+-webkit-font-smoothing: antialiased;
+text-rendering: optimizeLegibility;
+}
+
+/* Selection */
+
+::selection {
+background: #1768e5;
+color: #ffffff;
+}
+
+/* Links */
+
+a {
+transition:
+color 0.2s ease,
+background-color 0.2s ease,
+border-color 0.2s ease;
+}
+
+/* Buttons */
+
+button {
+cursor: pointer;
+transition:
+background-color 0.2s ease,
+border-color 0.2s ease,
+color 0.2s ease,
+transform 0.2s ease;
+}
+
+button:disabled {
+cursor: not-allowed;
+opacity: 0.6;
+}
+
+/* Form Controls */
+
+input,
+select,
+textarea {
+color: var(--isports-text-primary);
+}
+
+input,
+select,
+textarea {
+background-color: var(--isports-input-bg);
+}
+
+input::placeholder,
+textarea::placeholder {
+color: var(--isports-text-muted);
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+button:focus-visible,
+a:focus-visible {
+outline: 2px solid var(--isports-focus);
+outline-offset: 3px;
+}
+
+/* Tables */
+
+table {
+border-collapse: collapse;
+}
+
+/* Scrollbar */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #a8b8d0 #edf1f7;
+  }
+
+::-webkit-scrollbar {
+width: 10px;
+height: 10px;
+}
+
+::-webkit-scrollbar-track {
+background: #edf1f7;
+}
+
+::-webkit-scrollbar-thumb {
+background: #a8b8d0;
+border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+background: #8096b5;
+}
+
+/* Reduced Motion Accessibility */
+
+@media (prefers-reduced-motion: reduce) {
+*,
+*::before,
+*::after {
+scroll-behavior: auto !important;
+animation-duration: 0.01ms !important;
+animation-iteration-count: 1 !important;
+transition-duration: 0.01ms !important;
+}
 }

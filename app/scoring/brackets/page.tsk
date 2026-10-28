@@ -1,0 +1,1213 @@
+"use client";
+
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+
+import { getEvents } from "@/data/events";
+import {
+  getMatches,
+  StoredMatch,
+} from "@/data/matchStorage";
+import {
+  getScores,
+  StoredScore,
+} from "@/data/scoreStorage";
+import {
+  getBracketByEventId,
+  saveBracket,
+  TournamentBracket,
+  BracketMatch,
+} from "@/data/bracketStorage";
+import { canAccessEvent } from "@/data/inchargeAuth";
+
+type UserRole = "admin" | "incharge" | "";
+
+export default function BracketsPage() {
+  const events = getEvents();
+
+  const assignedEvent = events[0];
+
+  const [userRole, setUserRole] =
+    useState<UserRole>("");
+
+  const [authorized, setAuthorized] =
+    useState(false);
+
+  const [checked, setChecked] =
+    useState(false);
+
+  const [matches, setMatches] =
+    useState<StoredMatch[]>([]);
+
+  const [scores, setScores] =
+    useState<StoredScore[]>([]);
+
+  const [bracket, setBracket] =
+    useState<TournamentBracket | null>(null);
+
+  /*
+   * ---------------------------------------------------------
+   * LOAD USER + CHECK ACCESS
+   * ---------------------------------------------------------
+   */
+
+  useEffect(() => {
+    if (!assignedEvent) {
+      setChecked(true);
+      setAuthorized(false);
+      return;
+    }
+
+    const savedUser =
+      localStorage.getItem("isports_user");
+
+    if (!savedUser) {
+      setChecked(true);
+      setAuthorized(false);
+      return;
+    }
+
+    try {
+      const user = JSON.parse(savedUser);
+
+      const role: UserRole =
+        user.role === "admin"
+          ? "admin"
+          : user.role === "incharge"
+            ? "incharge"
+            : "";
+
+      setUserRole(role);
+
+      /*
+       * Admin can always manage/view brackets.
+       */
+      if (role === "admin") {
+        setAuthorized(true);
+        setChecked(true);
+        return;
+      }
+
+      /*
+       * In-Charge must have access to this event.
+       */
+      if (role === "incharge") {
+        const accessAllowed =
+          canAccessEvent(assignedEvent.id);
+
+        setAuthorized(accessAllowed);
+        setChecked(true);
+        return;
+      }
+
+      setAuthorized(false);
+      setChecked(true);
+    } catch {
+      setUserRole("");
+      setAuthorized(false);
+      setChecked(true);
+    }
+  }, [assignedEvent]);
+
+  /*
+   * ---------------------------------------------------------
+   * LOAD MATCHES + SCORES
+   * ---------------------------------------------------------
+   */
+
+  useEffect(() => {
+    if (!authorized || !assignedEvent) {
+      return;
+    }
+
+    const loadData = () => {
+      const allMatches = getMatches();
+      const allScores = getScores();
+
+      const eventMatches =
+        allMatches.filter(
+          (match) =>
+            match.eventId === assignedEvent.id
+        );
+
+      setMatches(eventMatches);
+      setScores(allScores);
+
+      const savedBracket =
+        getBracketByEventId(
+          assignedEvent.id
+        );
+
+      if (savedBracket) {
+        setBracket(savedBracket);
+      }
+    };
+
+    loadData();
+
+    const interval = setInterval(
+      loadData,
+      1000
+    );
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [authorized, assignedEvent]);
+
+  /*
+   * ---------------------------------------------------------
+   * SCORE LOOKUP
+   * ---------------------------------------------------------
+   */
+
+  const getScoreForMatch = (
+    matchId: string
+  ): StoredScore | undefined => {
+    return scores.find(
+      (score) =>
+        score.matchId === matchId
+    );
+  };
+
+  /*
+   * ---------------------------------------------------------
+   * DETERMINE WINNER
+   * ---------------------------------------------------------
+   */
+
+  const getWinner = (
+    match: StoredMatch
+  ): string | undefined => {
+    const score =
+      getScoreForMatch(match.id);
+
+    if (!score) {
+      return undefined;
+    }
+
+    /*
+     * Only Submitted / Locked scores
+     * are allowed to determine a winner.
+     */
+    if (
+      score.status !== "Submitted" &&
+      score.status !== "Locked"
+    ) {
+      return undefined;
+    }
+
+    if (score.scoreA > score.scoreB) {
+      return match.teamA;
+    }
+
+    if (score.scoreB > score.scoreA) {
+      return match.teamB;
+    }
+
+    /*
+     * Draw = no automatic winner.
+     */
+    return undefined;
+  };
+
+  /*
+   * ---------------------------------------------------------
+   * CREATE / SYNC BRACKET
+   * ---------------------------------------------------------
+   */
+
+  const generateBracket = () => {
+    if (!assignedEvent) {
+      return;
+    }
+
+    if (!authorized) {
+      alert(
+        "You are not authorized to manage this event."
+      );
+      return;
+    }
+
+    if (matches.length < 2) {
+      alert(
+        "Create at least two matches for this event before generating the tournament bracket."
+      );
+      return;
+    }
+
+    /*
+     * Use the first two actual event matches
+     * as Round 1.
+     */
+    const firstMatch = matches[0];
+    const secondMatch = matches[1];
+
+    const firstWinner =
+      getWinner(firstMatch);
+
+    const secondWinner =
+      getWinner(secondMatch);
+
+    const roundOneMatchA: BracketMatch = {
+      id: firstMatch.id,
+      eventId: assignedEvent.id,
+      teamA: firstMatch.teamA,
+      teamB: firstMatch.teamB,
+      status: firstWinner
+        ? "Completed"
+        : "Waiting",
+      winner: firstWinner,
+    };
+
+    const roundOneMatchB: BracketMatch = {
+      id: secondMatch.id,
+      eventId: assignedEvent.id,
+      teamA: secondMatch.teamA,
+      teamB: secondMatch.teamB,
+      status: secondWinner
+        ? "Completed"
+        : "Waiting",
+      winner: secondWinner,
+    };
+
+    /*
+     * Final is ready only when both
+     * Round 1 matches have winners.
+     */
+    const finalReady =
+      Boolean(
+        firstWinner && secondWinner
+      );
+
+    const existingBracket =
+      getBracketByEventId(
+        assignedEvent.id
+      );
+
+    const existingFinal =
+      existingBracket?.matches.find(
+        (match) =>
+          match.id ===
+          "final-" + assignedEvent.id
+      );
+
+    const finalMatch: BracketMatch = {
+      id:
+        "final-" +
+        assignedEvent.id,
+      eventId: assignedEvent.id,
+
+      teamA:
+        firstWinner ||
+        "Winner Match 1",
+
+      teamB:
+        secondWinner ||
+        "Winner Match 2",
+
+      sourceMatchA:
+        firstMatch.id,
+
+      sourceMatchB:
+        secondMatch.id,
+
+      status:
+        existingFinal?.status ===
+        "Completed"
+          ? "Completed"
+          : finalReady
+            ? "Ready"
+            : "Waiting",
+
+      winner:
+        existingFinal?.winner,
+    };
+
+    const updatedBracket:
+      TournamentBracket = {
+      eventId: assignedEvent.id,
+
+      matches: [
+        roundOneMatchA,
+        roundOneMatchB,
+        finalMatch,
+      ],
+
+      tournamentWinner:
+        existingBracket?.tournamentWinner,
+
+      updatedAt:
+        new Date().toISOString(),
+    };
+
+    saveBracket(
+      updatedBracket
+    );
+
+    setBracket(
+      updatedBracket
+    );
+  };
+
+  /*
+   * ---------------------------------------------------------
+   * AUTOMATIC BRACKET SYNC
+   * ---------------------------------------------------------
+   *
+   * Whenever submitted scores change,
+   * update Round 1 and Final.
+   */
+
+  useEffect(() => {
+    if (
+      !authorized ||
+      !assignedEvent ||
+      matches.length < 2
+    ) {
+      return;
+    }
+
+    const firstMatch = matches[0];
+    const secondMatch = matches[1];
+
+    const firstWinner =
+      getWinner(firstMatch);
+
+    const secondWinner =
+      getWinner(secondMatch);
+
+    const currentBracket =
+      getBracketByEventId(
+        assignedEvent.id
+      );
+
+    if (!currentBracket) {
+      return;
+    }
+
+    const existingFinal =
+      currentBracket.matches.find(
+        (match) =>
+          match.id ===
+          "final-" + assignedEvent.id
+      );
+
+    const finalReady =
+      Boolean(
+        firstWinner && secondWinner
+      );
+
+    const updatedBracket:
+      TournamentBracket = {
+      ...currentBracket,
+
+      matches: [
+        {
+          id: firstMatch.id,
+          eventId: assignedEvent.id,
+          teamA: firstMatch.teamA,
+          teamB: firstMatch.teamB,
+          status: firstWinner
+            ? "Completed"
+            : "Waiting",
+          winner: firstWinner,
+        },
+
+        {
+          id: secondMatch.id,
+          eventId: assignedEvent.id,
+          teamA: secondMatch.teamA,
+          teamB: secondMatch.teamB,
+          status: secondWinner
+            ? "Completed"
+            : "Waiting",
+          winner: secondWinner,
+        },
+
+        {
+          id:
+            "final-" +
+            assignedEvent.id,
+
+          eventId:
+            assignedEvent.id,
+
+          teamA:
+            firstWinner ||
+            "Winner Match 1",
+
+          teamB:
+            secondWinner ||
+            "Winner Match 2",
+
+          sourceMatchA:
+            firstMatch.id,
+
+          sourceMatchB:
+            secondMatch.id,
+
+          status:
+            existingFinal?.status ===
+            "Completed"
+              ? "Completed"
+              : finalReady
+                ? "Ready"
+                : "Waiting",
+
+          winner:
+            existingFinal?.winner,
+        },
+      ],
+
+      updatedAt:
+        new Date().toISOString(),
+    };
+
+    /*
+     * Do not overwrite if nothing changed.
+     */
+    const oldData =
+      JSON.stringify(
+        currentBracket
+      );
+
+    const newData =
+      JSON.stringify(
+        updatedBracket
+      );
+
+    if (oldData !== newData) {
+      saveBracket(
+        updatedBracket
+      );
+
+      setBracket(
+        updatedBracket
+      );
+    }
+  }, [
+    authorized,
+    assignedEvent,
+    matches,
+    scores,
+  ]);
+
+  /*
+   * ---------------------------------------------------------
+   * FINAL WINNER
+   * ---------------------------------------------------------
+   */
+
+  const handleFinalWinner = (
+    winner: string
+  ) => {
+    if (
+      !assignedEvent ||
+      !bracket
+    ) {
+      return;
+    }
+
+    const finalMatch =
+      bracket.matches.find(
+        (match) =>
+          match.id ===
+          "final-" +
+            assignedEvent.id
+      );
+
+    if (
+      !finalMatch ||
+      finalMatch.status !==
+        "Ready"
+    ) {
+      alert(
+        "The final is not ready yet."
+      );
+      return;
+    }
+
+    const updatedBracket:
+      TournamentBracket = {
+      ...bracket,
+
+      matches:
+        bracket.matches.map(
+          (match) =>
+            match.id ===
+            finalMatch.id
+              ? {
+                  ...match,
+                  status:
+                    "Completed",
+                  winner,
+                }
+              : match
+        ),
+
+      tournamentWinner:
+        winner,
+
+      updatedAt:
+        new Date().toISOString(),
+    };
+
+    saveBracket(
+      updatedBracket
+    );
+
+    setBracket(
+      updatedBracket
+    );
+  };
+
+  /*
+   * ---------------------------------------------------------
+   * REFRESH
+   * ---------------------------------------------------------
+   */
+
+  const refreshBracket = () => {
+    if (!assignedEvent) {
+      return;
+    }
+
+    const allMatches =
+      getMatches();
+
+    const allScores =
+      getScores();
+
+    setMatches(
+      allMatches.filter(
+        (match) =>
+          match.eventId ===
+          assignedEvent.id
+      )
+    );
+
+    setScores(
+      allScores
+    );
+
+    const savedBracket =
+      getBracketByEventId(
+        assignedEvent.id
+      );
+
+    setBracket(
+      savedBracket || null
+    );
+  };
+
+  /*
+   * ---------------------------------------------------------
+   * MATCH DATA
+   * ---------------------------------------------------------
+   */
+
+  const bracketMatches =
+    bracket?.matches || [];
+
+  const roundOneMatches =
+    bracketMatches.filter(
+      (match) =>
+        match.id !==
+          "final-" +
+            assignedEvent?.id
+    );
+
+  const finalMatch =
+    bracketMatches.find(
+      (match) =>
+        match.id ===
+        "final-" +
+          assignedEvent?.id
+    );
+
+  /*
+   * ---------------------------------------------------------
+   * LOADING
+   * ---------------------------------------------------------
+   */
+
+  if (!checked) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-gray-950 text-white">
+        <div className="text-center">
+          <p className="text-sm font-semibold uppercase tracking-widest text-blue-400">
+            iSports Scoring
+          </p>
+
+          <p className="mt-3 text-gray-400">
+            Checking access...
+          </p>
+        </div>
+      </main>
+    );
+  }
+
+  /*
+   * ---------------------------------------------------------
+   * NO EVENT
+   * ---------------------------------------------------------
+   */
+
+  if (!assignedEvent) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-gray-950 px-4 text-white">
+        <div className="w-full max-w-lg rounded-xl border border-yellow-800 bg-gray-900 p-8 text-center">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-yellow-800 bg-yellow-950/40 text-2xl">
+            ⚠️
+          </div>
+
+          <h1 className="mt-5 text-2xl font-bold">
+            No Event Available
+          </h1>
+
+          <p className="mt-3 text-sm leading-6 text-gray-400">
+            Create an event before managing
+            tournament brackets.
+          </p>
+
+          <Link
+            href="/admin/events"
+            className="mt-6 inline-block rounded-lg bg-white px-6 py-3 text-sm font-bold text-black transition hover:bg-gray-200"
+          >
+            Manage Events
+          </Link>
+        </div>
+      </main>
+    );
+  }
+
+  /*
+   * ---------------------------------------------------------
+   * ACCESS DENIED
+   * ---------------------------------------------------------
+   */
+
+  if (!authorized) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-gray-950 px-4 py-8 text-white">
+        <div className="w-full max-w-lg rounded-xl border border-red-800 bg-gray-900 p-8 text-center shadow-lg">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full border border-red-800 bg-red-950/40 text-2xl">
+            🔒
+          </div>
+
+          <p className="mt-5 text-xs font-semibold uppercase tracking-widest text-blue-400">
+            iSports Scoring
+          </p>
+
+          <h1 className="mt-3 text-3xl font-bold">
+            Access Denied
+          </h1>
+
+          <p className="mt-3 text-sm leading-6 text-gray-400">
+            You are not authorized to manage
+            this event.
+          </p>
+
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-center">
+            <Link
+              href="/incharge/dashboard"
+              className="rounded-lg bg-white px-6 py-3 text-sm font-bold text-black transition hover:bg-gray-200"
+            >
+              Back to Dashboard
+            </Link>
+
+            <Link
+              href="/"
+              className="rounded-lg border border-gray-700 bg-gray-950 px-6 py-3 text-sm font-semibold text-gray-200 transition hover:border-gray-600 hover:bg-gray-900"
+            >
+              Home
+            </Link>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  /*
+   * ---------------------------------------------------------
+   * MAIN PAGE
+   * ---------------------------------------------------------
+   */
+
+  return (
+    <main className="min-h-screen bg-gray-950 px-4 py-8 text-white sm:px-6 sm:py-10 lg:px-8 lg:py-12">
+      <div className="mx-auto max-w-7xl">
+
+        {/* HEADER */}
+
+        <section className="border-b border-gray-800 pb-8">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-widest text-blue-400">
+                iSports Scoring
+              </p>
+
+              <h1 className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl lg:text-5xl">
+                Tournament Bracket
+              </h1>
+
+              <p className="mt-4 max-w-3xl text-sm leading-6 text-gray-400 sm:text-base">
+                Match winners and tournament
+                progression are connected to
+                submitted scores.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={refreshBracket}
+              className="w-full rounded-lg bg-blue-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-blue-500 sm:w-auto"
+            >
+              Refresh Bracket
+            </button>
+
+          </div>
+        </section>
+
+        {/* EVENT */}
+
+        <section className="mt-8 rounded-xl border border-gray-800 bg-gray-900 p-5 shadow-sm sm:p-7">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-widest text-blue-400 sm:text-sm">
+                Event
+              </p>
+
+              <h2 className="mt-2 text-2xl font-bold sm:text-3xl">
+                {assignedEvent.name}
+              </h2>
+
+              <p className="mt-3 max-w-3xl text-sm leading-6 text-gray-400">
+                {assignedEvent.description}
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+
+              <span className="rounded-full border border-green-800 bg-green-950/40 px-4 py-2 text-xs font-bold text-green-400">
+                {userRole === "admin"
+                  ? "Admin Access"
+                  : "In-Charge Access"}
+              </span>
+
+              <span className="rounded-full border border-gray-700 bg-gray-950 px-4 py-2 text-xs font-semibold text-gray-400">
+                {matches.length} Event Matches
+              </span>
+
+            </div>
+
+          </div>
+
+          <div className="mt-6 grid gap-4 border-t border-gray-800 pt-6 sm:grid-cols-3">
+
+            <div className="rounded-lg border border-gray-800 bg-gray-950 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                Date
+              </p>
+
+              <p className="mt-2 text-sm font-semibold text-gray-200">
+                {assignedEvent.date}
+              </p>
+            </div>
+
+            <div className="rounded-lg border border-gray-800 bg-gray-950 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                Venue
+              </p>
+
+              <p className="mt-2 text-sm font-semibold text-gray-200">
+                {assignedEvent.venue}
+              </p>
+            </div>
+
+            <div className="rounded-lg border border-gray-800 bg-gray-950 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                Bracket Status
+              </p>
+
+              <p className="mt-2 text-sm font-semibold text-blue-400">
+                {bracket
+                  ? "Generated"
+                  : "Not Generated"}
+              </p>
+            </div>
+
+          </div>
+        </section>
+
+        {/* GENERATE BRACKET */}
+
+        {!bracket && (
+          <section className="mt-6 rounded-xl border border-yellow-800 bg-yellow-950/20 p-6 sm:mt-8 sm:p-8">
+
+            <p className="text-xs font-bold uppercase tracking-widest text-yellow-400">
+              Bracket Setup
+            </p>
+
+            <h2 className="mt-3 text-2xl font-bold text-yellow-300">
+              Bracket requires two matches
+            </h2>
+
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-yellow-200/70">
+              {matches.length < 2
+                ? "Create at least two matches for this event before generating the tournament bracket."
+                : "Two or more matches are available. Generate the bracket to connect them with the scoring system."}
+            </p>
+
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+
+              {matches.length >= 2 && (
+                <button
+                  type="button"
+                  onClick={generateBracket}
+                  className="rounded-lg bg-white px-6 py-3 text-sm font-bold text-black transition hover:bg-gray-200"
+                >
+                  Generate Tournament Bracket
+                </button>
+              )}
+
+              <Link
+                href={`/scoring/matches?eventId=${assignedEvent.id}`}
+                className="rounded-lg border border-gray-700 bg-gray-900 px-6 py-3 text-center text-sm font-semibold text-gray-200 transition hover:border-gray-600 hover:bg-gray-800"
+              >
+                Manage Matches
+              </Link>
+
+            </div>
+          </section>
+        )}
+
+        {/* ROUND 1 */}
+
+        {bracket && (
+          <section className="mt-8">
+
+            <div className="mb-5">
+              <p className="text-xs font-semibold uppercase tracking-widest text-blue-400">
+                Round 1
+              </p>
+
+              <h2 className="mt-2 text-2xl font-bold">
+                Semi-Final Matches
+              </h2>
+
+              <p className="mt-2 text-sm text-gray-500">
+                Winners are calculated automatically
+                from submitted or locked scores.
+              </p>
+            </div>
+
+            <div className="grid gap-5 lg:grid-cols-2">
+
+              {roundOneMatches.map(
+                (match, index) => {
+                  const sourceMatch =
+                    matches.find(
+                      (item) =>
+                        item.id ===
+                        match.id
+                    );
+
+                  const score =
+                    sourceMatch
+                      ? getScoreForMatch(
+                          sourceMatch.id
+                        )
+                      : undefined;
+
+                  return (
+                    <div
+                      key={match.id}
+                      className="rounded-xl border border-gray-800 bg-gray-900 p-5 shadow-sm sm:p-6"
+                    >
+
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-bold uppercase tracking-widest text-blue-400">
+                          Match {index + 1}
+                        </p>
+
+                        <span
+                          className={`rounded-full border px-3 py-1.5 text-xs font-bold ${
+                            match.status ===
+                            "Completed"
+                              ? "border-green-800 bg-green-950/40 text-green-400"
+                              : "border-yellow-800 bg-yellow-950/40 text-yellow-400"
+                          }`}
+                        >
+                          {match.status}
+                        </span>
+                      </div>
+
+                      <div className="mt-6 rounded-lg border border-gray-800 bg-gray-950 p-5">
+
+                        <div className="flex items-center justify-between gap-4">
+
+                          <div className="min-w-0">
+                            <p className="break-words text-xl font-bold">
+                              {match.teamA}
+                            </p>
+
+                            {match.winner ===
+                              match.teamA && (
+                              <p className="mt-1 text-xs font-bold uppercase tracking-wider text-green-400">
+                                Winner
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="shrink-0 text-sm font-bold text-gray-600">
+                            VS
+                          </div>
+
+                          <div className="min-w-0 text-right">
+                            <p className="break-words text-xl font-bold">
+                              {match.teamB}
+                            </p>
+
+                            {match.winner ===
+                              match.teamB && (
+                              <p className="mt-1 text-xs font-bold uppercase tracking-wider text-green-400">
+                                Winner
+                              </p>
+                            )}
+                          </div>
+
+                        </div>
+
+                        {score && (
+                          <div className="mt-5 border-t border-gray-800 pt-4 text-center">
+
+                            <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                              Score
+                            </p>
+
+                            <p className="mt-2 text-2xl font-bold">
+                              {score.scoreA}
+                              <span className="mx-2 text-gray-600">
+                                -
+                              </span>
+                              {score.scoreB}
+                            </p>
+
+                            <p className="mt-1 text-xs font-semibold text-gray-500">
+                              {score.status}
+                            </p>
+
+                          </div>
+                        )}
+
+                      </div>
+
+                      {sourceMatch && (
+                        <Link
+                          href={`/scoring/matches/${sourceMatch.id}`}
+                          className="mt-4 block w-full rounded-lg border border-gray-700 bg-gray-950 px-5 py-3 text-center text-sm font-semibold text-gray-200 transition hover:border-gray-600 hover:bg-gray-800"
+                        >
+                          Manage Score
+                        </Link>
+                      )}
+
+                    </div>
+                  );
+                }
+              )}
+
+            </div>
+          </section>
+        )}
+
+        {/* FINAL */}
+
+        {bracket && finalMatch && (
+          <section className="mt-10">
+
+            <div className="mb-5 text-center">
+              <p className="text-xs font-semibold uppercase tracking-widest text-purple-400">
+                Round 2
+              </p>
+
+              <h2 className="mt-2 text-2xl font-bold">
+                Tournament Final
+              </h2>
+
+              <p className="mt-2 text-sm text-gray-500">
+                The two Round 1 winners advance
+                automatically.
+              </p>
+            </div>
+
+            <div className="mx-auto max-w-2xl rounded-xl border border-purple-800 bg-purple-950/20 p-5 shadow-sm sm:p-7">
+
+              <div className="flex items-center justify-between">
+
+                <p className="text-xs font-bold uppercase tracking-widest text-purple-400">
+                  Final
+                </p>
+
+                <span
+                  className={`rounded-full border px-3 py-1.5 text-xs font-bold ${
+                    finalMatch.status ===
+                    "Completed"
+                      ? "border-green-800 bg-green-950/40 text-green-400"
+                      : finalMatch.status ===
+                          "Ready"
+                        ? "border-blue-800 bg-blue-950/40 text-blue-400"
+                        : "border-yellow-800 bg-yellow-950/40 text-yellow-400"
+                  }`}
+                >
+                  {finalMatch.status}
+                </span>
+
+              </div>
+
+              <div className="mt-6 grid gap-4 sm:grid-cols-2">
+
+                <div
+                  className={`rounded-lg border p-5 text-center ${
+                    finalMatch.teamA.startsWith(
+                      "Winner"
+                    )
+                      ? "border-gray-800 bg-gray-950 text-gray-500"
+                      : "border-blue-800 bg-blue-950/20"
+                  }`}
+                >
+                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    Finalist 1
+                  </p>
+
+                  <p className="mt-3 break-words text-xl font-bold">
+                    {finalMatch.teamA}
+                  </p>
+                </div>
+
+                <div
+                  className={`rounded-lg border p-5 text-center ${
+                    finalMatch.teamB.startsWith(
+                      "Winner"
+                    )
+                      ? "border-gray-800 bg-gray-950 text-gray-500"
+                      : "border-blue-800 bg-blue-950/20"
+                  }`}
+                >
+                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    Finalist 2
+                  </p>
+
+                  <p className="mt-3 break-words text-xl font-bold">
+                    {finalMatch.teamB}
+                  </p>
+                </div>
+
+              </div>
+
+              {finalMatch.status ===
+                "Ready" && (
+                <div className="mt-6 border-t border-purple-900 pt-6">
+
+                  <p className="text-center text-sm font-semibold text-gray-300">
+                    Select the tournament winner
+                  </p>
+
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleFinalWinner(
+                          finalMatch.teamA
+                        )
+                      }
+                      className="rounded-lg bg-white px-5 py-3.5 text-sm font-bold text-black transition hover:bg-gray-200"
+                    >
+                      {finalMatch.teamA} Wins
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleFinalWinner(
+                          finalMatch.teamB
+                        )
+                      }
+                      className="rounded-lg bg-white px-5 py-3.5 text-sm font-bold text-black transition hover:bg-gray-200"
+                    >
+                      {finalMatch.teamB} Wins
+                    </button>
+
+                  </div>
+                </div>
+              )}
+
+              {finalMatch.status ===
+                "Completed" &&
+                finalMatch.winner && (
+                  <div className="mt-6 rounded-lg border border-green-800 bg-green-950/30 p-5 text-center">
+
+                    <p className="text-xs font-bold uppercase tracking-widest text-green-400">
+                      Final Winner
+                    </p>
+
+                    <p className="mt-2 text-2xl font-bold text-green-300">
+                      {finalMatch.winner}
+                    </p>
+
+                  </div>
+                )}
+
+            </div>
+          </section>
+        )}
+
+        {/* TOURNAMENT WINNER */}
+
+        {bracket?.tournamentWinner && (
+          <section className="mt-10 rounded-xl border border-green-800 bg-green-950/20 p-8 text-center">
+
+            <p className="text-xs font-bold uppercase tracking-widest text-green-400">
+              Tournament Champion
+            </p>
+
+            <h2 className="mt-3 text-3xl font-bold text-green-300 sm:text-4xl">
+              🏆 {bracket.tournamentWinner}
+            </h2>
+
+            <p className="mt-3 text-sm text-gray-400">
+              This tournament winner has been
+              saved to the bracket.
+            </p>
+
+          </section>
+        )}
+
+        {/* NAVIGATION */}
+
+        <section className="mt-8 flex flex-col gap-3 border-t border-gray-800 pt-8 sm:flex-row sm:flex-wrap">
+
+          <Link
+            href={`/scoring/matches?eventId=${assignedEvent.id}`}
+            className="rounded-lg border border-gray-700 bg-gray-900 px-6 py-3 text-center text-sm font-semibold text-gray-200 transition hover:border-gray-600 hover:bg-gray-800"
+          >
+            ← Back to Match Management
+          </Link>
+
+          <Link
+            href="/incharge/dashboard"
+            className="rounded-lg border border-gray-700 bg-gray-900 px-6 py-3 text-center text-sm font-semibold text-gray-200 transition hover:border-gray-600 hover:bg-gray-800"
+          >
+            In-Charge Dashboard
+          </Link>
+
+        </section>
+
+      </div>
+    </main>
+  );
+}

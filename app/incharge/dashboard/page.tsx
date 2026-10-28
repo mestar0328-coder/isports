@@ -35,6 +35,7 @@ export default function InChargeDashboardPage() {
       const parsedUser = JSON.parse(savedUser);
 
       if (parsedUser.role !== "incharge") {
+        localStorage.removeItem("isports_user");
         router.replace("/incharge/login");
         return;
       }
@@ -42,10 +43,24 @@ export default function InChargeDashboardPage() {
       const accounts = getInChargeAccounts();
 
       const account = accounts.find(
-        (item) => item.username === parsedUser.username
+        (item) =>
+          item.id === parsedUser.accountId ||
+          item.username === parsedUser.username
       );
 
       if (!account) {
+        localStorage.removeItem("isports_user");
+        router.replace("/incharge/login");
+        return;
+      }
+
+      if (!account.isActive) {
+        localStorage.removeItem("isports_user");
+        router.replace("/incharge/login");
+        return;
+      }
+
+      if (new Date(account.expiresAt) < new Date()) {
         localStorage.removeItem("isports_user");
         router.replace("/incharge/login");
         return;
@@ -93,7 +108,6 @@ export default function InChargeDashboardPage() {
   return (
     <main className="min-h-screen bg-gray-950 px-6 py-10 text-white">
       <div className="mx-auto max-w-5xl">
-
         {/* HEADER */}
 
         <div className="flex flex-wrap items-center justify-between gap-4">
@@ -108,6 +122,7 @@ export default function InChargeDashboardPage() {
           </div>
 
           <button
+            type="button"
             onClick={handleLogout}
             className="rounded-lg bg-red-600 px-4 py-2 font-semibold hover:bg-red-500"
           >
@@ -173,6 +188,7 @@ export default function InChargeDashboardPage() {
                     </div>
 
                     <button
+                      type="button"
                       onClick={() =>
                         handleManageMatches(event.id)
                       }
@@ -186,7 +202,6 @@ export default function InChargeDashboardPage() {
             </div>
           )}
         </section>
-
       </div>
     </main>
   );

@@ -60,20 +60,18 @@ export default function MatchesPage() {
 
   const eventId = searchParams.get("eventId");
 
-  const [authorized, setAuthorized] =
-    useState(false);
+  const [authorized, setAuthorized] = useState(false);
+  const [checked, setChecked] = useState(false);
 
-  const [checked, setChecked] =
-    useState(false);
+  const [matches, setMatches] = useState<StoredMatch[]>(
+    () => getMatches()
+  );
 
-  const [matches, setMatches] =
-    useState<StoredMatch[]>(() => getMatches());
+  const [scores, setScores] = useState<StoredScore[]>(
+    () => getScores()
+  );
 
-  const [scores, setScores] =
-    useState<StoredScore[]>(() => getScores());
-
-  const [currentTime, setCurrentTime] =
-    useState(Date.now());
+  const [currentTime, setCurrentTime] = useState(Date.now());
 
   const [teamA, setTeamA] = useState("");
   const [teamB, setTeamB] = useState("");
@@ -82,20 +80,17 @@ export default function MatchesPage() {
   const events = getEvents();
 
   const assignedEvent = eventId
-    ? events.find(
-        (event) => event.id === eventId
-      )
+    ? events.find((event) => event.id === eventId)
     : null;
 
   useEffect(() => {
     if (!eventId) {
-      setChecked(true);
       setAuthorized(false);
+      setChecked(true);
       return;
     }
 
-    const accessAllowed =
-      canAccessEvent(eventId);
+    const accessAllowed = canAccessEvent(eventId);
 
     setAuthorized(accessAllowed);
     setChecked(true);
@@ -128,10 +123,7 @@ export default function MatchesPage() {
   ): MatchStatus => {
     const score = getScore(match.id);
 
-    if (
-      !score ||
-      score.status === "Draft"
-    ) {
+    if (!score || score.status === "Draft") {
       return "Upcoming";
     }
 
@@ -150,9 +142,7 @@ export default function MatchesPage() {
       const elapsed =
         currentTime - submittedTime;
 
-      if (
-        elapsed >= CORRECTION_TIME
-      ) {
+      if (elapsed >= CORRECTION_TIME) {
         return "Completed";
       }
 
@@ -176,13 +166,11 @@ export default function MatchesPage() {
     return "border-yellow-800 bg-yellow-950/40 text-yellow-400";
   };
 
-  const eventMatches =
-    eventId
-      ? matches.filter(
-          (match) =>
-            match.eventId === eventId
-        )
-      : [];
+  const eventMatches = eventId
+    ? matches.filter(
+        (match) => match.eventId === eventId
+      )
+    : [];
 
   const createMatch = () => {
     if (!assignedEvent || !eventId) {
@@ -245,11 +233,13 @@ export default function MatchesPage() {
     setScores(getScores());
   };
 
-  const openScorePage = (
-    matchId: string
-  ) => {
+  const openScorePage = (matchId: string) => {
+    if (!eventId) {
+      return;
+    }
+
     router.push(
-      `/scoring/matches/${matchId}`
+      `/scoring/matches/${matchId}?eventId=${eventId}`
     );
   };
 
@@ -265,7 +255,6 @@ export default function MatchesPage() {
     return (
       <main className="flex min-h-screen items-center justify-center bg-gray-950 px-4 py-8 text-white">
         <div className="w-full max-w-md rounded-xl border border-red-800 bg-gray-900 p-6 text-center shadow-sm sm:p-8">
-
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-red-800 bg-red-950/40 text-2xl">
             🔒
           </div>
@@ -288,7 +277,6 @@ export default function MatchesPage() {
           >
             Back to Dashboard
           </Link>
-
         </div>
       </main>
     );
@@ -297,11 +285,9 @@ export default function MatchesPage() {
   return (
     <main className="min-h-screen bg-gray-950 px-4 py-8 text-white sm:px-6 sm:py-10 lg:px-8 lg:py-12">
       <div className="mx-auto max-w-6xl">
-
         {/* HEADER */}
 
         <section className="border-b border-gray-800 pb-8 sm:pb-10">
-
           <p className="text-sm font-semibold uppercase tracking-widest text-blue-400">
             iSports Scoring
           </p>
@@ -313,17 +299,13 @@ export default function MatchesPage() {
           <p className="mt-4 max-w-2xl text-sm leading-6 text-gray-400 sm:text-base sm:leading-7">
             Create, manage and monitor matches for your assigned event.
           </p>
-
         </section>
 
         {/* ASSIGNED EVENT */}
 
         <section className="mt-8 rounded-xl border border-gray-800 bg-gray-900 p-5 shadow-sm sm:mt-10 sm:p-7">
-
           <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-
             <div className="min-w-0">
-
               <p className="text-xs font-semibold uppercase tracking-widest text-blue-400 sm:text-sm">
                 Assigned Event
               </p>
@@ -335,17 +317,14 @@ export default function MatchesPage() {
               <p className="mt-3 max-w-3xl text-sm leading-6 text-gray-400 sm:text-base">
                 {assignedEvent.description}
               </p>
-
             </div>
 
             <span className="w-fit shrink-0 rounded-full border border-green-800 bg-green-950/40 px-4 py-2 text-xs font-bold text-green-400">
               Authorized
             </span>
-
           </div>
 
           <div className="mt-6 grid gap-4 border-t border-gray-800 pt-6 sm:grid-cols-3 sm:gap-5">
-
             <div className="rounded-lg border border-gray-800 bg-gray-950 p-4">
               <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
                 Date
@@ -375,15 +354,12 @@ export default function MatchesPage() {
                 {eventMatches.length}
               </p>
             </div>
-
           </div>
-
         </section>
 
         {/* CREATE MATCH */}
 
         <section className="mt-6 rounded-xl border border-gray-800 bg-gray-900 p-5 shadow-sm sm:mt-8 sm:p-7">
-
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-blue-400">
               Match Setup
@@ -399,7 +375,6 @@ export default function MatchesPage() {
           </div>
 
           <div className="mt-6 grid gap-4 md:grid-cols-3 md:gap-5">
-
             <div>
               <label
                 htmlFor="team-a"
@@ -421,10 +396,7 @@ export default function MatchesPage() {
                 </option>
 
                 {teams.map((team) => (
-                  <option
-                    key={team}
-                    value={team}
-                  >
+                  <option key={team} value={team}>
                     {team}
                   </option>
                 ))}
@@ -452,10 +424,7 @@ export default function MatchesPage() {
                 </option>
 
                 {teams.map((team) => (
-                  <option
-                    key={team}
-                    value={team}
-                  >
+                  <option key={team} value={team}>
                     {team}
                   </option>
                 ))}
@@ -482,11 +451,9 @@ export default function MatchesPage() {
                 className="mt-2 w-full rounded-lg border border-gray-700 bg-gray-950 px-4 py-3 text-sm text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30"
               />
             </div>
-
           </div>
 
           <div className="mt-6 border-t border-gray-800 pt-6">
-
             <button
               type="button"
               onClick={createMatch}
@@ -494,17 +461,13 @@ export default function MatchesPage() {
             >
               Create Match
             </button>
-
           </div>
-
         </section>
 
         {/* MATCH LIST */}
 
         <section className="mt-6 rounded-xl border border-gray-800 bg-gray-900 p-5 shadow-sm sm:mt-8 sm:p-7">
-
           <div className="flex flex-col gap-3 border-b border-gray-800 pb-6 sm:flex-row sm:items-end sm:justify-between">
-
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-blue-400">
                 Event Matches
@@ -526,13 +489,10 @@ export default function MatchesPage() {
             <span className="w-fit rounded-full border border-gray-800 bg-gray-950 px-3 py-1.5 text-xs font-semibold text-gray-500">
               Live status updates
             </span>
-
           </div>
 
           {eventMatches.length === 0 ? (
-
             <div className="mt-6 rounded-lg border border-dashed border-gray-800 bg-gray-950 px-5 py-10 text-center sm:px-6 sm:py-12">
-
               <p className="text-base font-semibold text-gray-300 sm:text-lg">
                 No matches available
               </p>
@@ -540,32 +500,21 @@ export default function MatchesPage() {
               <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-gray-500">
                 Create a match above to begin managing scores.
               </p>
-
             </div>
-
           ) : (
-
             <div className="mt-6 space-y-4">
-
               {eventMatches.map((match) => {
-                const score =
-                  getScore(match.id);
-
-                const status =
-                  getMatchStatus(match);
+                const score = getScore(match.id);
+                const status = getMatchStatus(match);
 
                 return (
                   <div
                     key={match.id}
                     className="rounded-xl border border-gray-800 bg-gray-950 p-5 transition hover:border-gray-700 sm:p-6"
                   >
-
                     <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-
                       <div className="min-w-0">
-
                         <div className="flex flex-wrap items-center gap-2">
-
                           <p className="break-words text-lg font-bold tracking-tight sm:text-xl">
                             {match.teamA}
                           </p>
@@ -577,11 +526,9 @@ export default function MatchesPage() {
                           <p className="break-words text-lg font-bold tracking-tight sm:text-xl">
                             {match.teamB}
                           </p>
-
                         </div>
 
                         <div className="mt-3 flex flex-col gap-2 text-sm text-gray-500 sm:flex-row sm:flex-wrap sm:gap-x-5">
-
                           <span>
                             Match Date:{" "}
                             <span className="font-medium text-gray-300">
@@ -597,13 +544,10 @@ export default function MatchesPage() {
                               </span>
                             </span>
                           )}
-
                         </div>
-
                       </div>
 
                       <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center lg:w-auto">
-
                         <span
                           className={`w-fit rounded-full border px-4 py-2 text-xs font-bold ${getStatusStyle(
                             status
@@ -615,42 +559,31 @@ export default function MatchesPage() {
                         <button
                           type="button"
                           onClick={() =>
-                            openScorePage(
-                              match.id
-                            )
+                            openScorePage(match.id)
                           }
                           className="w-full rounded-lg bg-white px-5 py-3 text-sm font-bold text-black transition hover:bg-gray-200 active:bg-gray-300 sm:w-auto"
                         >
                           Manage Score
                         </button>
-
                       </div>
-
                     </div>
-
                   </div>
                 );
               })}
-
             </div>
-
           )}
-
         </section>
 
         {/* NAVIGATION */}
 
         <section className="mt-6 sm:mt-8">
-
           <Link
             href="/incharge/dashboard"
             className="inline-block w-full rounded-lg border border-gray-700 bg-gray-900 px-6 py-3 text-center text-sm font-semibold text-gray-200 transition hover:border-gray-600 hover:bg-gray-800 sm:w-auto"
           >
             ← Back to In-Charge Dashboard
           </Link>
-
         </section>
-
       </div>
     </main>
   );

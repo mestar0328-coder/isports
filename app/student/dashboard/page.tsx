@@ -1,14 +1,48 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 export default function StudentDashboardPage() {
   const router = useRouter();
+  const [authorized, setAuthorized] = useState(false);
+
+  useEffect(() => {
+    const savedUser = localStorage.getItem("isports_user");
+
+    if (!savedUser) {
+      router.replace("/student/login");
+      return;
+    }
+
+    try {
+      const user = JSON.parse(savedUser);
+
+      if (user.role !== "student") {
+        localStorage.removeItem("isports_user");
+        router.replace("/student/login");
+        return;
+      }
+
+      setAuthorized(true);
+    } catch {
+      localStorage.removeItem("isports_user");
+      router.replace("/student/login");
+    }
+  }, [router]);
 
   function handleLogout() {
     localStorage.removeItem("isports_user");
     router.push("/");
+  }
+
+  if (!authorized) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-gray-950 text-white">
+        <p className="text-gray-400">Checking access...</p>
+      </main>
+    );
   }
 
   return (
@@ -27,6 +61,7 @@ export default function StudentDashboardPage() {
           </div>
 
           <button
+            type="button"
             onClick={handleLogout}
             className="rounded-lg border border-gray-700 px-4 py-2 text-sm font-semibold text-gray-300 transition hover:border-red-500 hover:text-red-400"
           >
@@ -93,7 +128,7 @@ export default function StudentDashboardPage() {
           </Link>
 
           <Link
-            href="/results"
+            href="/scoring/results"
             className="rounded-2xl border border-gray-800 bg-gray-900 p-6 transition hover:-translate-y-1 hover:border-green-500 hover:bg-gray-800"
           >
             <div className="text-4xl">🏆</div>

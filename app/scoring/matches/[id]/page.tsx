@@ -18,13 +18,19 @@ import {
   canAccessEvent,
   isInchargeAuthorized,
 } from "@/data/inchargeAuth";
+import { getInChargeAccounts } from "@/data/inchargeStorage";
 import { addScoreAudit } from "@/data/scoreAudit";
 
 const CORRECTION_TIME = 45 * 60 * 1000;
 
 export default function ScoreEntryPage() {
-  const params = useParams();
-  const matchId = params.id as string;
+  const params = useParams<{
+    matchId?: string;
+    id?: string;
+  }>();
+
+  const matchId =
+    params.matchId ?? params.id ?? "";
 
   const [match, setMatch] =
     useState<StoredMatch | null>(null);
@@ -49,19 +55,64 @@ export default function ScoreEntryPage() {
 
   const events = getEvents();
 
-  // --------------------------------------------------
-  // FIND EVENT BELONGING TO THIS MATCH
-  // --------------------------------------------------
-
   const assignedEvent = match
     ? events.find(
         (event) => event.id === match.eventId
       )
     : null;
 
+  function hasValidInchargeSession() {
+    if (typeof window === "undefined") {
+      return false;
+    }
+
+    const savedUser =
+      localStorage.getItem("isports_user");
+
+    if (!savedUser) {
+      return false;
+    }
+
+    try {
+      const parsedUser = JSON.parse(savedUser);
+
+      if (parsedUser.role !== "incharge") {
+        return false;
+      }
+
+      const accounts = getInChargeAccounts();
+
+      const account = accounts.find(
+        (item) =>
+          item.id === parsedUser.accountId ||
+          item.username === parsedUser.username
+      );
+
+      if (!account) {
+        return false;
+      }
+
+      if (!account.isActive) {
+        return false;
+      }
+
+      if (
+        new Date(account.expiresAt) <
+        new Date()
+      ) {
+        return false;
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   const authorized =
     !!match &&
     !!assignedEvent &&
+    hasValidInchargeSession() &&
     isInchargeAuthorized() &&
     canAccessEvent(assignedEvent.id);
 
@@ -74,7 +125,8 @@ export default function ScoreEntryPage() {
       const matches = getMatches();
 
       const currentMatch = matches.find(
-        (item) => item.id === matchId
+        (item) =>
+          String(item.id) === String(matchId)
       );
 
       if (currentMatch) {
@@ -84,7 +136,9 @@ export default function ScoreEntryPage() {
       const scores = getScores();
 
       const savedScore = scores.find(
-        (item) => item.matchId === matchId
+        (item) =>
+          String(item.matchId) ===
+          String(matchId)
       );
 
       if (savedScore) {
@@ -139,7 +193,8 @@ export default function ScoreEntryPage() {
         const currentScore =
           scores.find(
             (item) =>
-              item.matchId === matchId
+              String(item.matchId) ===
+              String(matchId)
           );
 
         if (
@@ -432,7 +487,6 @@ export default function ScoreEntryPage() {
       <main className="min-h-screen bg-gray-950 px-4 py-8 text-white sm:px-6 sm:py-10 lg:px-8 lg:py-12">
         <div className="mx-auto max-w-5xl">
           <div className="rounded-xl border border-red-800 bg-gray-900 p-6 text-center shadow-sm sm:p-8">
-
             <p className="text-xs font-semibold uppercase tracking-widest text-blue-400">
               iSports Scoring
             </p>
@@ -451,7 +505,6 @@ export default function ScoreEntryPage() {
             >
               Back to Dashboard
             </Link>
-
           </div>
         </div>
       </main>
@@ -466,7 +519,6 @@ export default function ScoreEntryPage() {
     return (
       <main className="flex min-h-screen items-center justify-center bg-gray-950 px-4 py-8 text-white sm:px-6 sm:py-10">
         <div className="w-full max-w-md rounded-xl border border-red-800 bg-gray-900 p-6 text-center shadow-sm sm:p-8">
-
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-red-800 bg-red-950/40 text-2xl">
             🔒
           </div>
@@ -489,7 +541,6 @@ export default function ScoreEntryPage() {
           >
             Back to Matches
           </Link>
-
         </div>
       </main>
     );
@@ -512,11 +563,9 @@ export default function ScoreEntryPage() {
   return (
     <main className="min-h-screen bg-gray-950 px-4 py-8 text-white sm:px-6 sm:py-10 lg:px-8 lg:py-12">
       <div className="mx-auto max-w-5xl">
-
         {/* HEADER */}
 
         <section className="border-b border-gray-800 pb-8 sm:pb-10">
-
           <p className="text-sm font-semibold uppercase tracking-widest text-blue-400">
             iSports Scoring
           </p>
@@ -528,17 +577,13 @@ export default function ScoreEntryPage() {
           <p className="mt-4 max-w-2xl text-sm leading-6 text-gray-400 sm:text-base sm:leading-7">
             Enter and manage the score for this match.
           </p>
-
         </section>
 
         {/* MATCH INFORMATION */}
 
         <section className="mt-8 rounded-xl border border-gray-800 bg-gray-900 p-5 shadow-sm sm:mt-10 sm:p-7">
-
           <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-
             <div className="min-w-0">
-
               <p className="text-xs font-semibold uppercase tracking-widest text-blue-400 sm:text-sm">
                 {assignedEvent.sport}
               </p>
@@ -554,11 +599,9 @@ export default function ScoreEntryPage() {
               <p className="mt-3 text-sm text-gray-500">
                 {assignedEvent.name}
               </p>
-
             </div>
 
             <div className="w-full shrink-0 rounded-lg border border-gray-800 bg-gray-950 px-4 py-3 sm:w-auto sm:min-w-40 sm:text-right">
-
               <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
                 Match Date
               </p>
@@ -566,13 +609,10 @@ export default function ScoreEntryPage() {
               <p className="mt-1 text-sm font-semibold text-gray-200">
                 {match.date}
               </p>
-
             </div>
-
           </div>
 
           <div className="mt-6 grid gap-4 border-t border-gray-800 pt-6 sm:grid-cols-2 sm:gap-5">
-
             <div className="rounded-lg border border-gray-800 bg-gray-950 p-4">
               <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
                 Match ID
@@ -592,17 +632,13 @@ export default function ScoreEntryPage() {
                 {assignedEvent.name}
               </p>
             </div>
-
           </div>
-
         </section>
 
         {/* SCORE STATUS */}
 
         <section className="mt-6 rounded-xl border border-gray-800 bg-gray-900 p-5 shadow-sm sm:mt-8 sm:p-7">
-
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-blue-400">
                 Match State
@@ -640,18 +676,14 @@ export default function ScoreEntryPage() {
                 Locked
               </span>
             )}
-
           </div>
-
         </section>
 
         {/* CORRECTION WINDOW */}
 
         {isSubmitted && !isLocked && (
           <section className="mt-6 rounded-xl border border-blue-800 bg-blue-950/20 p-5 shadow-sm sm:mt-8 sm:p-7">
-
             <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
-
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wider text-blue-400">
                   Score Correction
@@ -667,7 +699,6 @@ export default function ScoreEntryPage() {
               </div>
 
               <div className="rounded-xl border border-blue-900 bg-gray-950 px-5 py-4 sm:min-w-44 sm:text-center">
-
                 <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
                   Time Remaining
                 </p>
@@ -685,18 +716,14 @@ export default function ScoreEntryPage() {
                     Correction expired
                   </p>
                 )}
-
               </div>
-
             </div>
-
           </section>
         )}
 
         {/* SCORE ENTRY */}
 
         <section className="mt-6 rounded-xl border border-gray-800 bg-gray-900 p-5 shadow-sm sm:mt-8 sm:p-7">
-
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-blue-400">
               Scoreboard
@@ -712,13 +739,10 @@ export default function ScoreEntryPage() {
           </div>
 
           <div className="mt-6 grid gap-4 sm:mt-7 sm:grid-cols-2 sm:gap-6">
-
             {/* TEAM A */}
 
             <div className="rounded-xl border border-gray-800 bg-gray-950 p-5 sm:p-6">
-
               <div className="text-center">
-
                 <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
                   Team A
                 </p>
@@ -729,7 +753,6 @@ export default function ScoreEntryPage() {
                 >
                   {match.teamA}
                 </label>
-
               </div>
 
               <input
@@ -744,20 +767,16 @@ export default function ScoreEntryPage() {
                     e.target.value;
 
                   if (/^\d*$/.test(value)) {
-                    setTeamAScore(value);
-                  }
+                    setTeamAScore(value);}
                 }}
                 className="mt-5 w-full rounded-xl border border-gray-700 bg-gray-900 px-4 py-5 text-center text-4xl font-bold text-white outline-none transition hover:border-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30 disabled:cursor-not-allowed disabled:opacity-50 sm:text-5xl"
               />
-
             </div>
 
             {/* TEAM B */}
 
             <div className="rounded-xl border border-gray-800 bg-gray-950 p-5 sm:p-6">
-
               <div className="text-center">
-
                 <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
                   Team B
                 </p>
@@ -768,8 +787,8 @@ export default function ScoreEntryPage() {
                 >
                   {match.teamB}
                 </label>
-
               </div>
+
               <input
                 id="team-b-score"
                 type="number"
@@ -787,17 +806,13 @@ export default function ScoreEntryPage() {
                 }}
                 className="mt-5 w-full rounded-xl border border-gray-700 bg-gray-900 px-4 py-5 text-center text-4xl font-bold text-white outline-none transition hover:border-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30 disabled:cursor-not-allowed disabled:opacity-50 sm:text-5xl"
               />
-
             </div>
-
           </div>
 
           {/* ACTIONS */}
 
           <div className="mt-6 border-t border-gray-800 pt-6 sm:mt-7 sm:pt-7">
-
             <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-
               {!isLocked && (
                 <>
                   <button
@@ -829,12 +844,10 @@ export default function ScoreEntryPage() {
                   )}
                 </>
               )}
-
             </div>
 
             {isLocked && (
               <div className="mt-4 rounded-lg border border-green-800 bg-green-950/30 p-4">
-
                 <p className="text-sm font-semibold text-green-400">
                   Score is locked.
                 </p>
@@ -842,18 +855,14 @@ export default function ScoreEntryPage() {
                 <p className="mt-1 text-xs leading-5 text-green-300/80">
                   This score can no longer be edited.
                 </p>
-
               </div>
             )}
-
           </div>
-
         </section>
 
         {/* CURRENT SCORE */}
 
         <section className="mt-6 rounded-xl border border-gray-800 bg-gray-900 p-5 shadow-sm sm:mt-8 sm:p-7">
-
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-blue-400">
               Saved Result
@@ -869,11 +878,8 @@ export default function ScoreEntryPage() {
           </div>
 
           {score ? (
-
             <div className="mt-6 grid gap-4 sm:grid-cols-2 sm:gap-6">
-
               <div className="rounded-xl border border-gray-800 bg-gray-950 p-5 text-center sm:p-6">
-
                 <p className="break-words text-sm font-semibold text-gray-400 sm:text-base">
                   {score.teamA}
                 </p>
@@ -881,11 +887,9 @@ export default function ScoreEntryPage() {
                 <p className="mt-3 text-5xl font-bold tracking-tight text-white">
                   {score.scoreA}
                 </p>
-
               </div>
 
               <div className="rounded-xl border border-gray-800 bg-gray-950 p-5 text-center sm:p-6">
-
                 <p className="break-words text-sm font-semibold text-gray-400 sm:text-base">
                   {score.teamB}
                 </p>
@@ -893,15 +897,10 @@ export default function ScoreEntryPage() {
                 <p className="mt-3 text-5xl font-bold tracking-tight text-white">
                   {score.scoreB}
                 </p>
-
               </div>
-
             </div>
-
           ) : (
-
             <div className="mt-6 rounded-xl border border-dashed border-gray-700 bg-gray-950 px-5 py-10 text-center sm:px-6 sm:py-12">
-
               <p className="text-sm font-semibold text-gray-400">
                 No score saved yet
               </p>
@@ -909,17 +908,13 @@ export default function ScoreEntryPage() {
               <p className="mt-2 text-sm leading-6 text-gray-500">
                 Enter the scores above and save or submit them.
               </p>
-
             </div>
-
           )}
-
         </section>
 
         {/* NAVIGATION */}
 
         <div className="mt-6 flex flex-col gap-3 pb-6 sm:mt-8 sm:flex-row sm:justify-between sm:pb-8">
-
           <Link
             href={`/scoring/matches?eventId=${match.eventId}`}
             className="w-full rounded-xl border border-gray-700 bg-gray-900 px-5 py-3.5 text-center text-sm font-bold text-gray-200 transition hover:border-gray-600 hover:bg-gray-800 sm:w-auto"
@@ -933,9 +928,7 @@ export default function ScoreEntryPage() {
           >
             Scoring Dashboard
           </Link>
-
         </div>
-
       </div>
     </main>
   );
