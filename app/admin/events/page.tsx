@@ -45,7 +45,7 @@ export default function AdminEventsPage() {
           <div className="flex flex-wrap gap-3">
             <button
               type="button"
-              onClick={() => router.push("/admin/events/new")}
+              onClick={() => router.push("/admin/event/new")}
               className="rounded-lg bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-500"
             >
               Create Event
