@@ -1,11 +1,17 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import SportCard from "@/components/SportCard";
 import { getCustomSports } from "@/data/sportsStorage";
 
 export default function Home() {
-const sports = getCustomSports();
+  const [sports, setSports] = useState<ReturnType<typeof getCustomSports>>([]);
+
+  useEffect(() => {
+    setSports(getCustomSports());
+  }, []);
+
 
 return (
 <main className="min-h-screen overflow-hidden bg-slate-50 text-slate-900">
