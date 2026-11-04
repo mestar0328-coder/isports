@@ -141,9 +141,9 @@ export default function StudentDashboardPage() {
               View published match scores and competition results.
             </p>
 
-            <span className="mt-5 inline-block text-sm font-bold text-green-400">
+            <p className="mt-5 text-sm font-bold text-green-400">
               View Results →
-            </span>
+            </p>
           </Link>
         </div>
       </section>

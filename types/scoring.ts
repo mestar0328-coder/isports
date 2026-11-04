@@ -27,22 +27,17 @@ export type CricketDelivery = {
   innings: number;
   over: number;
   ball: number;
-
   batterId?: string;
   bowlerId?: string;
-
   batRuns: number;
   extraRuns: number;
-
   extraType?:
     | "wide"
     | "no-ball"
     | "bye"
     | "leg-bye"
     | "penalty";
-
   isWicket: boolean;
-
   wicketType?:
     | "bowled"
     | "caught"
@@ -52,22 +47,17 @@ export type CricketDelivery = {
     | "hit-wicket"
     | "retired-out"
     | "other";
-
   dismissedPlayerId?: string;
-
   timestamp: string;
 };
 
 export type CricketInnings = {
   inningsNumber: number;
   battingTeamId: string;
-
   runs: number;
   wickets: number;
-
   legalBalls: number;
   completed: boolean;
-
   deliveries: CricketDelivery[];
   target?: number;
 };
@@ -82,33 +72,26 @@ export type CricketScore = {
 
 export type InningRunsScore = {
   inningsCount: number;
-
   teamA: number[];
   teamB: number[];
-
   winnerTeamId?: string;
 };
 
 export type CombatScore = {
   teamOrAthleteA: number;
   teamOrAthleteB: number;
-
   penaltiesA: number;
   penaltiesB: number;
-
   disqualifiedA: boolean;
   disqualifiedB: boolean;
-
   winnerId?: string;
   result?: string;
 };
 
 export type JudgeRound = {
   round: number;
-
   judgeScoresA: number[];
   judgeScoresB: number[];
-
   winnerA: number;
   winnerB: number;
 };
@@ -123,13 +106,11 @@ export type JudgedPerformanceScore = {
   difficulty: number;
   execution: number;
   deductions: number;
-
   finalScore: number;
 };
 
 export type TargetScore = {
   athleteId: string;
-
   rounds: number[][];
   total: number;
 };
@@ -147,13 +128,10 @@ export type BowlingScore = {
 
 export type GolfScore = {
   mode: "stroke-play" | "match-play";
-
   strokesByHole: number[];
   parByHole: number[];
-
   totalStrokes: number;
   totalPar: number;
-
   relativeToPar: number;
   holesWon?: number;
   holesLost?: number;
@@ -176,10 +154,8 @@ export type RallySetsScore = {
     sideA: number;
     sideB: number;
   }[];
-
   gamesWonA: number;
   gamesWonB: number;
-
   winnerId?: string;
 };
 
@@ -191,13 +167,11 @@ export type StrengthScore = {
 
 export type MultiEventScore = {
   athleteId: string;
-
   eventScores: {
     eventId: string;
     score: number;
     points: number;
   }[];
-
   totalPoints: number;
 };
 
@@ -228,11 +202,15 @@ export type EventScoreRecord = {
   id: string;
   eventId: string;
 
+  // Optional links to the match and individual athlete.
+  // Existing event-level and team score records remain compatible.
+  matchId?: string;
+  athleteId?: string;
+
   sportId?: string;
   scoringEngine: ScoringEngine;
 
   status: ScoreStatus;
-
   data: SportScoreData;
 
   createdAt: string;

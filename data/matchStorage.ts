@@ -1,12 +1,24 @@
 export type MatchStatus = "Upcoming" | "Live" | "Completed";
 
+export type MatchParticipant = {
+  registrationId: string;
+  name: string;
+};
+
 export type StoredMatch = {
   id: string;
   eventId: string;
+
+  // Retained for compatibility with existing team matches.
   teamA: string;
   teamB: string;
+
   date: string;
   status: MatchStatus;
+
+  // Optional fields for individual competitions.
+  matchType?: "team" | "individual";
+  participants?: MatchParticipant[];
 };
 
 const STORAGE_KEY = "isports_matches";
@@ -23,7 +35,11 @@ export function getMatches(): StoredMatch[] {
   }
 
   try {
-    return JSON.parse(stored);
+    const parsed: unknown = JSON.parse(stored);
+
+    return Array.isArray(parsed)
+      ? (parsed as StoredMatch[])
+      : [];
   } catch {
     return [];
   }

@@ -4,14 +4,17 @@ import Link from "next/link";
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
-import { getEvents } from "@/data/events";
+import { getEvents } from "@/data/eventsStorage";
 import {
 getMatches,
 saveMatch,
 type StoredMatch,
 type MatchStatus,
+type MatchParticipant,
 } from "@/data/matchStorage";
 import { canAccessEvent } from "@/data/inchargeAuth";
+import { getRegistrations } from "@/data/registrationStorage";
+import { resolveScoringEngine } from "@/lib/scoring/resolveEngine";
 
 type StoredScore = {
 matchId: string;
@@ -22,6 +25,7 @@ submittedAt?: string | null;
 };
 
 const SCORE_STORAGE_KEY = "isports_scores";
+const CORRECTION_TIME = 45 * 60 * 1000;
 
 const getScores = (): StoredScore[] => {
 if (typeof window === "undefined") {
@@ -42,9 +46,37 @@ return [];
 }
 };
 
-const CORRECTION_TIME = 45 * 60 * 1000;
+function getApprovedParticipants(
+eventId: string,
+individualEvent: boolean
+): MatchParticipant[] {
+const approvedRegistrations = getRegistrations().filter(
+(registration) =>
+registration.eventId === eventId &&
+registration.status === "Approved"
+);
 
-const teams = ["Team A", "Team B", "Team C", "Team D"];
+const participants = approvedRegistrations
+.filter((registration) =>
+individualEvent
+? registration.registrationType === "Individual"
+: registration.registrationType === "Team"
+)
+.map((registration) => ({
+registrationId: registration.id,
+name: individualEvent
+? registration.applicantName.trim()
+: registration.teamName?.trim() || "",
+}))
+.filter((participant) => participant.name.length > 0);
+
+return participants.filter(
+(participant, index, array) =>
+array.findIndex(
+(item) => item.registrationId === participant.registrationId
+) === index
+);
+}
 
 function MatchesContent() {
 const router = useRouter();
@@ -56,6 +88,7 @@ const [checked, setChecked] = useState(false);
 
 const [matches, setMatches] = useState<StoredMatch[]>([]);
 const [scores, setScores] = useState<StoredScore[]>([]);
+const [participants, setParticipants] = useState<MatchParticipant[]>([]);
 const [currentTime, setCurrentTime] = useState(Date.now());
 
 const [teamA, setTeamA] = useState("");
@@ -67,6 +100,13 @@ const events = getEvents();
 const assignedEvent = eventId
 ? events.find((event) => event.id === eventId)
 : null;
+
+const scoringEngine = assignedEvent
+? resolveScoringEngine(assignedEvent)
+: "custom";
+
+const isIndividualEvent =
+assignedEvent?.registrationType === "individual";
 
 useEffect(() => {
 setMatches(getMatches());
@@ -80,11 +120,22 @@ setChecked(true);
 return;
 }
 
-const accessAllowed = canAccessEvent(eventId);
-setAuthorized(accessAllowed);
+setAuthorized(canAccessEvent(eventId));
 setChecked(true);
 
 }, [eventId]);
+
+useEffect(() => {
+if (!eventId) {
+setParticipants([]);
+return;
+}
+
+setParticipants(
+  getApprovedParticipants(eventId, isIndividualEvent)
+);
+
+}, [eventId, isIndividualEvent]);
 
 useEffect(() => {
 if (!authorized) {
@@ -154,20 +205,12 @@ if (!canAccessEvent(eventId)) {
   return;
 }
 
-if (!teamA) {
-  alert("Please select Team A.");
-  return;
-}
+const currentlyApprovedParticipants = getApprovedParticipants(
+  eventId,
+  isIndividualEvent
+);
 
-if (!teamB) {
-  alert("Please select Team B.");
-  return;
-}
-
-if (teamA === teamB) {
-  alert("Team A and Team B must be different.");
-  return;
-}
+setParticipants(currentlyApprovedParticipants);
 
 if (!date) {
   alert("Please select a match date.");
@@ -179,22 +222,81 @@ if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
   return;
 }
 
-const newMatch: StoredMatch = {
-  id: `match-${Date.now()}`,
-  eventId,
-  teamA,
-  teamB,
-  date,
-  status: "Upcoming",
-};
+if (isIndividualEvent) {
+  if (currentlyApprovedParticipants.length < 1) {
+    alert("At least one approved individual athlete is required.");
+    return;
+  }
 
-saveMatch(newMatch);
+  const newMatch: StoredMatch = {
+    id: `match-${Date.now()}`,
+    eventId,
+    teamA: "Individual Competition",
+    teamB: "Individual Competition",
+    date,
+    status: "Upcoming",
+    matchType: "individual",
+    participants: currentlyApprovedParticipants,
+  };
+
+  saveMatch(newMatch);
+} else {
+  if (currentlyApprovedParticipants.length < 2) {
+    alert(
+      "At least two approved teams are required to create a match."
+    );
+    return;
+  }
+
+  if (!teamA) {
+    alert("Please select Team A.");
+    return;
+  }
+
+  if (!teamB) {
+    alert("Please select Team B.");
+    return;
+  }
+
+  if (teamA === teamB) {
+    alert("Team A and Team B must be different.");
+    return;
+  }
+
+  const approvedNames = currentlyApprovedParticipants.map(
+    (participant) => participant.name
+  );
+
+  if (!approvedNames.includes(teamA) || !approvedNames.includes(teamB)) {
+    alert("Both teams must have approved registrations.");
+    return;
+  }
+
+  const newMatch: StoredMatch = {
+    id: `match-${Date.now()}`,
+    eventId,
+    teamA,
+    teamB,
+    date,
+    status: "Upcoming",
+    matchType: "team",
+  };
+
+  saveMatch(newMatch);
+}
 
 setTeamA("");
 setTeamB("");
 setDate("");
+
 setMatches(getMatches());
 setScores(getScores());
+
+alert(
+  isIndividualEvent
+    ? "Individual competition created successfully!"
+    : "Match created successfully!"
+);
 
 };
 
@@ -254,13 +356,15 @@ return (
 <p className="text-sm font-semibold uppercase tracking-widest text-blue-400">
 iSports Scoring
 </p>
-<h1 className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl lg:text-5xl">
-Match Management
-</h1>
-<p className="mt-4 max-w-2xl text-sm leading-6 text-gray-400 sm:text-base sm:leading-7">
-Create, manage and monitor matches for your assigned event.
-</p>
-</section>
+
+      <h1 className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl lg:text-5xl">
+        Match Management
+      </h1>
+
+      <p className="mt-4 max-w-2xl text-sm leading-6 text-gray-400 sm:text-base sm:leading-7">
+        Create, manage and monitor competitions for your assigned event.
+      </p>
+    </section>
 
     <section className="mt-8 rounded-xl border border-gray-800 bg-gray-900 p-5 shadow-sm sm:mt-10 sm:p-7">
       <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
@@ -268,91 +372,210 @@ Create, manage and monitor matches for your assigned event.
           <p className="text-xs font-semibold uppercase tracking-widest text-blue-400 sm:text-sm">
             Assigned Event
           </p>
+
           <h2 className="mt-2 break-words text-2xl font-bold tracking-tight sm:mt-3 sm:text-3xl">
             {assignedEvent.name}
           </h2>
+
           <p className="mt-3 max-w-3xl text-sm leading-6 text-gray-400 sm:text-base">
             {assignedEvent.description}
           </p>
         </div>
+
         <span className="w-fit shrink-0 rounded-full border border-green-800 bg-green-950/40 px-4 py-2 text-xs font-bold text-green-400">
           Authorized
         </span>
       </div>
 
-      <div className="mt-6 grid gap-4 border-t border-gray-800 pt-6 sm:grid-cols-3 sm:gap-5">
+      <div className="mt-6 grid gap-4 border-t border-gray-800 pt-6 sm:grid-cols-4 sm:gap-5">
         <div className="rounded-lg border border-gray-800 bg-gray-950 p-4">
-          <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Date</p>
-          <p className="mt-2 text-sm font-semibold text-gray-200">{assignedEvent.date}</p>
+          <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+            Date
+          </p>
+          <p className="mt-2 text-sm font-semibold text-gray-200">
+            {assignedEvent.date}
+          </p>
         </div>
+
         <div className="rounded-lg border border-gray-800 bg-gray-950 p-4">
-          <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Venue</p>
-          <p className="mt-2 text-sm font-semibold text-gray-200">{assignedEvent.venue}</p>
+          <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+            Competition Type
+          </p>
+          <p className="mt-2 text-sm font-semibold text-gray-200">
+            {isIndividualEvent ? "Individual" : "Team"}
+          </p>
         </div>
+
         <div className="rounded-lg border border-gray-800 bg-gray-950 p-4">
-          <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Matches</p>
-          <p className="mt-2 text-sm font-semibold text-blue-400">{eventMatches.length}</p>
+          <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+            Scoring Engine
+          </p>
+          <p className="mt-2 text-sm font-semibold text-blue-400">
+            {scoringEngine}
+          </p>
+        </div>
+
+        <div className="rounded-lg border border-gray-800 bg-gray-950 p-4">
+          <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+            Competitions
+          </p>
+          <p className="mt-2 text-sm font-semibold text-blue-400">
+            {eventMatches.length}
+          </p>
         </div>
       </div>
     </section>
 
     <section className="mt-6 rounded-xl border border-gray-800 bg-gray-900 p-5 shadow-sm sm:mt-8 sm:p-7">
       <div>
-        <p className="text-xs font-semibold uppercase tracking-wider text-blue-400">Match Setup</p>
-        <h2 className="mt-2 text-xl font-bold sm:text-2xl">Create Match</h2>
+        <p className="text-xs font-semibold uppercase tracking-wider text-blue-400">
+          Competition Setup
+        </p>
+
+        <h2 className="mt-2 text-xl font-bold sm:text-2xl">
+          {isIndividualEvent
+            ? "Create Individual Competition"
+            : "Create Team Match"}
+        </h2>
+
         <p className="mt-2 text-sm leading-6 text-gray-500">
-          Select the participating teams and match date.
+          {isIndividualEvent
+            ? "All currently approved individual athletes will be included in this competition."
+            : "Select two approved teams and the match date."}
         </p>
       </div>
 
-      <div className="mt-6 grid gap-4 md:grid-cols-3 md:gap-5">
-        <div>
-          <label htmlFor="team-a" className="block text-sm font-semibold text-gray-300">Team A</label>
-          <select
-            id="team-a"
-            value={teamA}
-            onChange={(e) => setTeamA(e.target.value)}
-            className="mt-2 w-full rounded-lg border border-gray-700 bg-gray-950 px-4 py-3 text-sm text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30"
-          >
-            <option value="">Select Team</option>
-            {teams.map((team) => <option key={team} value={team}>{team}</option>)}
-          </select>
+      {participants.length === 0 ||
+      (!isIndividualEvent && participants.length < 2) ? (
+        <div className="mt-6 rounded-lg border border-yellow-800 bg-yellow-950/20 p-4">
+          <p className="text-sm font-semibold text-yellow-400">
+            Not enough approved participants
+          </p>
+          <p className="mt-2 text-sm leading-6 text-gray-400">
+            {isIndividualEvent
+              ? "At least one approved individual registration is required."
+              : "At least two approved team registrations are required. Approve registrations from the Admin Dashboard first."}
+          </p>
         </div>
+      ) : (
+        <div className="mt-6 space-y-5">
+          {isIndividualEvent ? (
+            <div className="rounded-lg border border-gray-800 bg-gray-950 p-4">
+              <p className="text-sm font-semibold text-gray-200">
+                Approved athletes included
+              </p>
 
-        <div>
-          <label htmlFor="team-b" className="block text-sm font-semibold text-gray-300">Team B</label>
-          <select
-            id="team-b"
-            value={teamB}
-            onChange={(e) => setTeamB(e.target.value)}
-            className="mt-2 w-full rounded-lg border border-gray-700 bg-gray-950 px-4 py-3 text-sm text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30"
-          >
-            <option value="">Select Team</option>
-            {teams.map((team) => <option key={team} value={team}>{team}</option>)}
-          </select>
-        </div>
+              <div className="mt-3 space-y-2">
+                {participants.map((participant) => (
+                  <div
+                    key={participant.registrationId}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-800 px-3 py-3"
+                  >
+                    <span className="text-sm font-medium text-gray-200">
+                      {participant.name}
+                    </span>
 
-        <div>
-          <label htmlFor="match-date" className="block text-sm font-semibold text-gray-300">Match Date</label>
-          <input
-            id="match-date"
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            min="2026-01-01"
-            max="2099-12-31"
-            className="mt-2 w-full rounded-lg border border-gray-700 bg-gray-950 px-4 py-3 text-sm text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30"
-          />
+                    <span className="text-xs text-green-400">
+                      Approved
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <label
+                  htmlFor="team-a"
+                  className="block text-sm font-semibold text-gray-300"
+                >
+                  Team A
+                </label>
+
+                <select
+                  id="team-a"
+                  value={teamA}
+                  onChange={(event) => setTeamA(event.target.value)}
+                  className="mt-2 w-full rounded-lg border border-gray-700 bg-gray-950 px-4 py-3 text-sm text-white outline-none focus:border-blue-500"
+                >
+                  <option value="">Select Team A</option>
+
+                  {participants.map((participant) => (
+                    <option
+                      key={participant.registrationId}
+                      value={participant.name}
+                    >
+                      {participant.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="team-b"
+                  className="block text-sm font-semibold text-gray-300"
+                >
+                  Team B
+                </label>
+
+                <select
+                  id="team-b"
+                  value={teamB}
+                  onChange={(event) => setTeamB(event.target.value)}
+                  className="mt-2 w-full rounded-lg border border-gray-700 bg-gray-950 px-4 py-3 text-sm text-white outline-none focus:border-blue-500"
+                >
+                  <option value="">Select Team B</option>
+
+                  {participants
+                    .filter((participant) => participant.name !== teamA)
+                    .map((participant) => (
+                      <option
+                        key={participant.registrationId}
+                        value={participant.name}
+                      >
+                        {participant.name}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            </div>
+          )}
+
+          <div>
+            <label
+              htmlFor="match-date"
+              className="block text-sm font-semibold text-gray-300"
+            >
+              {isIndividualEvent ? "Competition Date" : "Match Date"}
+            </label>
+
+            <input
+              id="match-date"
+              type="date"
+              value={date}
+              onChange={(event) => setDate(event.target.value)}
+              min="2026-01-01"
+              max="2099-12-31"
+              className="mt-2 w-full rounded-lg border border-gray-700 bg-gray-950 px-4 py-3 text-sm text-white outline-none focus:border-blue-500 md:max-w-sm"
+            />
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="mt-6 border-t border-gray-800 pt-6">
         <button
           type="button"
           onClick={createMatch}
-          className="w-full rounded-lg bg-white px-7 py-3.5 text-sm font-bold text-black transition hover:bg-gray-200 active:bg-gray-300 sm:w-auto"
+          disabled={
+            participants.length === 0 ||
+            (!isIndividualEvent && participants.length < 2)
+          }
+          className="w-full rounded-lg bg-white px-7 py-3.5 text-sm font-bold text-black transition hover:bg-gray-200 active:bg-gray-300 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
         >
-          Create Match
+          {isIndividualEvent
+            ? "Create Individual Competition"
+            : "Create Match"}
         </button>
       </div>
     </section>
@@ -360,12 +583,20 @@ Create, manage and monitor matches for your assigned event.
     <section className="mt-6 rounded-xl border border-gray-800 bg-gray-900 p-5 shadow-sm sm:mt-8 sm:p-7">
       <div className="flex flex-col gap-3 border-b border-gray-800 pb-6 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-blue-400">Event Matches</p>
-          <h2 className="mt-2 text-xl font-bold sm:text-2xl">Assigned Event Matches</h2>
+          <p className="text-xs font-semibold uppercase tracking-wider text-blue-400">
+            Event Competitions
+          </p>
+
+          <h2 className="mt-2 text-xl font-bold sm:text-2xl">
+            Assigned Event Matches
+          </h2>
+
           <p className="mt-2 text-sm leading-6 text-gray-500">
-            {eventMatches.length} {eventMatches.length === 1 ? "match" : "matches"} available
+            {eventMatches.length}{" "}
+            {eventMatches.length === 1 ? "competition" : "competitions"} available
           </p>
         </div>
+
         <span className="w-fit rounded-full border border-gray-800 bg-gray-950 px-3 py-1.5 text-xs font-semibold text-gray-500">
           Live status updates
         </span>
@@ -373,9 +604,12 @@ Create, manage and monitor matches for your assigned event.
 
       {eventMatches.length === 0 ? (
         <div className="mt-6 rounded-lg border border-dashed border-gray-800 bg-gray-950 px-5 py-10 text-center sm:px-6 sm:py-12">
-          <p className="text-base font-semibold text-gray-300 sm:text-lg">No matches available</p>
+          <p className="text-base font-semibold text-gray-300 sm:text-lg">
+            No competitions available
+          </p>
+
           <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-gray-500">
-            Create a match above to begin managing scores.
+            Create a competition above to begin managing scores.
           </p>
         </div>
       ) : (
@@ -383,33 +617,70 @@ Create, manage and monitor matches for your assigned event.
           {eventMatches.map((match) => {
             const score = getScore(match.id);
             const status = getMatchStatus(match);
+            const individualMatch =
+              match.matchType === "individual";
 
             return (
-              <div key={match.id} className="rounded-xl border border-gray-800 bg-gray-950 p-5 transition hover:border-gray-700 sm:p-6">
+              <div
+                key={match.id}
+                className="rounded-xl border border-gray-800 bg-gray-950 p-5 transition hover:border-gray-700 sm:p-6"
+              >
                 <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <p className="break-words text-lg font-bold tracking-tight sm:text-xl">{match.teamA}</p>
-                      <span className="text-sm font-semibold text-gray-600">VS</span>
-                      <p className="break-words text-lg font-bold tracking-tight sm:text-xl">{match.teamB}</p>
+                      {individualMatch ? (
+                        <p className="text-lg font-bold tracking-tight sm:text-xl">
+                          Individual Competition
+                        </p>
+                      ) : (
+                        <>
+                          <p className="break-words text-lg font-bold tracking-tight sm:text-xl">
+                            {match.teamA}
+                          </p>
+
+                          <span className="text-sm font-semibold text-gray-600">
+                            VS
+                          </span>
+
+                          <p className="break-words text-lg font-bold tracking-tight sm:text-xl">
+                            {match.teamB}
+                          </p>
+                        </>
+                      )}
                     </div>
+
+                    {individualMatch && (
+                      <p className="mt-2 text-sm text-gray-400">
+                        {match.participants?.length ?? 0} athletes
+                      </p>
+                    )}
 
                     <div className="mt-3 flex flex-col gap-2 text-sm text-gray-500 sm:flex-row sm:flex-wrap sm:gap-x-5">
                       <span>
-                        Match Date: <span className="font-medium text-gray-300">{match.date}</span>
+                        Date:{" "}
+                        <span className="font-medium text-gray-300">
+                          {match.date}
+                        </span>
                       </span>
-                      {score && (
+
+                      {score && !individualMatch && (
                         <span>
-                          Score: <span className="font-semibold text-gray-300">{score.scoreA} - {score.scoreB}</span>
+                          Score:{" "}
+                          <span className="font-semibold text-gray-300">
+                            {score.scoreA} - {score.scoreB}
+                          </span>
                         </span>
                       )}
                     </div>
                   </div>
 
                   <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center lg:w-auto">
-                    <span className={`w-fit rounded-full border px-4 py-2 text-xs font-bold ${getStatusStyle(status)}`}>
+                    <span
+                      className={`w-fit rounded-full border px-4 py-2 text-xs font-bold ${getStatusStyle(status)}`}
+                    >
                       {status}
                     </span>
+
                     <button
                       type="button"
                       onClick={() => openScorePage(match.id)}
@@ -436,20 +707,19 @@ Create, manage and monitor matches for your assigned event.
     </section>
   </div>
 </main>
-
 );
 }
 
 export default function MatchesPage() {
-return (
-<Suspense
-fallback={
-<main className="flex min-h-screen items-center justify-center bg-gray-950 text-white">
-Loading matches...
-</main>
-}
->
-<MatchesContent />
-</Suspense>
-);
+  return (
+    <Suspense
+      fallback={
+        <main className="flex min-h-screen items-center justify-center bg-gray-950 text-white">
+          Loading...
+        </main>
+      }
+    >
+      <MatchesContent />
+    </Suspense>
+  );
 }

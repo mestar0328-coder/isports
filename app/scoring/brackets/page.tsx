@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { events } from "@/data/events";
 import {
@@ -19,10 +19,40 @@ import {
   type TournamentBracket,
 } from "@/data/bracketStorage";
 
-export default function BracketsPage() {
-  const assignedEvent = events[0];
+const FINAL_MATCH_ID = "final";
 
-  const [matches, setMatches] = useState<StoredMatch[]>([]);
+function isPublishedScore(
+  score: StoredScore | undefined
+): score is StoredScore {
+  return (
+    score?.status === "Submitted" ||
+    score?.status === "Locked"
+  );
+}
+
+function getWinner(
+  score: StoredScore | undefined
+): string | undefined {
+  if (!isPublishedScore(score)) {
+    return undefined;
+  }
+
+  if (score.scoreA === score.scoreB) {
+    return undefined;
+  }
+
+  return score.scoreA > score.scoreB
+    ? score.teamA
+    : score.teamB;
+}
+
+export default function BracketsPage() {
+  const [selectedEventId, setSelectedEventId] =
+    useState("");
+
+  const [matches, setMatches] =
+    useState<StoredMatch[]>([]);
+
   const [scores, setScores] = useState<
     Record<string, StoredScore | undefined>
   >({});
@@ -31,6 +61,107 @@ export default function BracketsPage() {
     useState<TournamentBracket | null>(null);
 
   const [userRole, setUserRole] = useState("");
+
+  const [isLoaded, setIsLoaded] = useState(false);
+
+  const selectedEvent = useMemo(
+    () =>
+      events.find(
+        (event) => event.id === selectedEventId
+      ),
+    [selectedEventId]
+  );
+
+  const loadEventData = useCallback(
+    (eventId: string) => {
+      if (!eventId) {
+        setMatches([]);
+        setScores({});
+        setBracket(null);
+        setIsLoaded(true);
+        return;
+      }
+
+      const storedMatches = getMatches();
+
+      const eventMatches = storedMatches.filter(
+        (match) => match.eventId === eventId
+      );
+
+      const scoreMap: Record<
+        string,
+        StoredScore | undefined
+      > = {};
+
+      eventMatches.forEach((match) => {
+        scoreMap[match.id] =
+          getScoreByMatchId(match.id);
+      });
+
+      setMatches(eventMatches);
+      setScores(scoreMap);
+
+      const existingBracket =
+        getBracketByEventId(eventId);
+
+      if (existingBracket) {
+        setBracket(existingBracket);
+        setIsLoaded(true);
+        return;
+      }
+
+      if (eventMatches.length < 2) {
+        setBracket(null);
+        setIsLoaded(true);
+        return;
+      }
+
+      /*
+       * This preserves the existing three-match format:
+       * two Round 1 matches and one final.
+       *
+       * It does not automatically generate brackets
+       * for larger tournament formats.
+       */
+      const firstMatch = eventMatches[0];
+      const secondMatch = eventMatches[1];
+
+      const initialBracket: TournamentBracket = {
+        eventId,
+        matches: [
+          {
+            id: firstMatch.id,
+            eventId,
+            teamA: firstMatch.teamA,
+            teamB: firstMatch.teamB,
+            status: "Waiting",
+          },
+          {
+            id: secondMatch.id,
+            eventId,
+            teamA: secondMatch.teamA,
+            teamB: secondMatch.teamB,
+            status: "Waiting",
+          },
+          {
+            id: FINAL_MATCH_ID,
+            eventId,
+            teamA: "Winner Match 1",
+            teamB: "Winner Match 2",
+            sourceMatchA: firstMatch.id,
+            sourceMatchB: secondMatch.id,
+            status: "Waiting",
+          },
+        ],
+        updatedAt: new Date().toISOString(),
+      };
+
+      saveBracket(initialBracket);
+      setBracket(initialBracket);
+      setIsLoaded(true);
+    },
+    []
+  );
 
   useEffect(() => {
     const savedUser =
@@ -45,77 +176,40 @@ export default function BracketsPage() {
       }
     }
 
-    const storedMatches = getMatches();
-
-    const eventMatches = storedMatches.filter(
-      (match) => match.eventId === assignedEvent.id
+    const params = new URLSearchParams(
+      window.location.search
     );
 
-    setMatches(eventMatches);
+    const requestedEventId =
+      params.get("eventId");
 
-    const scoreMap: Record<
-      string,
-      StoredScore | undefined
-    > = {};
+    const initialEvent =
+      events.find(
+        (event) => event.id === requestedEventId
+      ) || events[0];
 
-    eventMatches.forEach((match) => {
-      scoreMap[match.id] =
-        getScoreByMatchId(match.id);
-    });
-
-    setScores(scoreMap);
-
-    const existingBracket =
-      getBracketByEventId(assignedEvent.id);
-
-    if (existingBracket) {
-      setBracket(existingBracket);
-      return;
+    if (initialEvent) {
+      setSelectedEventId(initialEvent.id);
+    } else {
+      setIsLoaded(true);
     }
-
-    if (eventMatches.length < 2) {
-      return;
-    }
-
-    const firstMatch = eventMatches[0];
-    const secondMatch = eventMatches[1];
-
-    const initialBracket: TournamentBracket = {
-      eventId: assignedEvent.id,
-      matches: [
-        {
-          id: firstMatch.id,
-          eventId: assignedEvent.id,
-          teamA: firstMatch.teamA,
-          teamB: firstMatch.teamB,
-          status: "Waiting",
-        },
-        {
-          id: secondMatch.id,
-          eventId: assignedEvent.id,
-          teamA: secondMatch.teamA,
-          teamB: secondMatch.teamB,
-          status: "Waiting",
-        },
-        {
-          id: "final",
-          eventId: assignedEvent.id,
-          teamA: "Winner Match 1",
-          teamB: "Winner Match 2",
-          sourceMatchA: firstMatch.id,
-          sourceMatchB: secondMatch.id,
-          status: "Waiting",
-        },
-      ],
-      updatedAt: new Date().toISOString(),
-    };
-
-    saveBracket(initialBracket);
-    setBracket(initialBracket);
-  }, [assignedEvent.id]);
+  }, []);
 
   useEffect(() => {
-    if (!bracket) {
+    if (!selectedEventId) {
+      return;
+    }
+
+    setIsLoaded(false);
+    loadEventData(selectedEventId);
+  }, [selectedEventId, loadEventData]);
+
+  useEffect(() => {
+    if (!bracket || !selectedEventId) {
+      return;
+    }
+
+    if (bracket.eventId !== selectedEventId) {
       return;
     }
 
@@ -123,27 +217,29 @@ export default function BracketsPage() {
 
     const updatedMatches = bracket.matches.map(
       (bracketMatch) => {
+        if (bracketMatch.id === FINAL_MATCH_ID) {
+          return bracketMatch;
+        }
+
         const score = scores[bracketMatch.id];
+        const winner = getWinner(score);
 
-        if (!score) {
+        if (!winner) {
+          if (
+            bracketMatch.winner ||
+            bracketMatch.status === "Completed"
+          ) {
+            changed = true;
+
+            return {
+              ...bracketMatch,
+              winner: undefined,
+              status: "Waiting" as const,
+            };
+          }
+
           return bracketMatch;
         }
-
-        if (
-          score.status !== "Submitted" &&
-          score.status !== "Locked"
-        ) {
-          return bracketMatch;
-        }
-
-        if (score.scoreA === score.scoreB) {
-          return bracketMatch;
-        }
-
-        const winner =
-          score.scoreA > score.scoreB
-            ? score.teamA
-            : score.teamB;
 
         if (
           bracketMatch.winner === winner &&
@@ -155,82 +251,97 @@ export default function BracketsPage() {
         changed = true;
 
         return {
-...bracketMatch,
-status: "Completed" as const,
-winner,
-};
+          ...bracketMatch,
+          winner,
+          status: "Completed" as const,
+        };
       }
     );
 
-    const roundOneMatches =
-      updatedMatches.filter(
-        (match) => match.id !== "final"
-      );
-
-    const finalMatch =
-      updatedMatches.find(
-        (match) => match.id === "final"
-      );
+    const finalMatch = updatedMatches.find(
+      (match) => match.id === FINAL_MATCH_ID
+    );
 
     if (!finalMatch) {
       return;
     }
 
-    const firstMatch =
-      roundOneMatches.find(
-        (match) =>
-          match.id === finalMatch.sourceMatchA
-      );
+    const firstMatch = updatedMatches.find(
+      (match) =>
+        match.id === finalMatch.sourceMatchA
+    );
 
-    const secondMatch =
-      roundOneMatches.find(
-        (match) =>
-          match.id === finalMatch.sourceMatchB
-      );
+    const secondMatch = updatedMatches.find(
+      (match) =>
+        match.id === finalMatch.sourceMatchB
+    );
 
-    const firstWinner =
-      firstMatch?.winner;
+    const firstWinner = firstMatch?.winner;
+    const secondWinner = secondMatch?.winner;
 
-    const secondWinner =
-      secondMatch?.winner;
+    const finalTeamA =
+      firstWinner || "Winner Match 1";
 
-    let finalStatus:
+    const finalTeamB =
+      secondWinner || "Winner Match 2";
+
+    const finalStatus:
       | "Waiting"
       | "Ready"
-      | "Completed" = "Waiting";
+      | "Completed" =
+      finalMatch.winner &&
+      firstWinner &&
+      secondWinner
+        ? "Completed"
+        : firstWinner && secondWinner
+          ? "Ready"
+          : "Waiting";
 
-    if (firstWinner && secondWinner) {
-      finalStatus = "Ready";
-    }
-
-    if (finalMatch.winner) {
-      finalStatus = "Completed";
-    }
+    const finalWinnerStillValid =
+      finalMatch.winner === finalTeamA ||
+      finalMatch.winner === finalTeamB;
 
     const updatedFinal: BracketMatch = {
       ...finalMatch,
-      teamA:
-        firstWinner || "Winner Match 1",
-      teamB:
-        secondWinner || "Winner Match 2",
-      status: finalStatus,
+      teamA: finalTeamA,
+      teamB: finalTeamB,
+      status:
+        finalStatus === "Completed" &&
+        !finalWinnerStillValid
+          ? "Ready"
+          : finalStatus,
+      winner:
+        finalWinnerStillValid
+          ? finalMatch.winner
+          : undefined,
     };
 
     if (
       updatedFinal.teamA !== finalMatch.teamA ||
       updatedFinal.teamB !== finalMatch.teamB ||
-      updatedFinal.status !== finalMatch.status
+      updatedFinal.status !== finalMatch.status ||
+      updatedFinal.winner !== finalMatch.winner
     ) {
       changed = true;
     }
 
     const finalIndex = updatedMatches.findIndex(
-      (match) => match.id === "final"
+      (match) => match.id === FINAL_MATCH_ID
     );
 
     if (finalIndex >= 0) {
-      updatedMatches[finalIndex] =
-        updatedFinal;
+      updatedMatches[finalIndex] = updatedFinal;
+    }
+
+    const tournamentWinner =
+      updatedFinal.status === "Completed"
+        ? updatedFinal.winner
+        : undefined;
+
+    if (
+      bracket.tournamentWinner !== tournamentWinner
+    ) {
+      changed = true;
     }
 
     if (!changed) {
@@ -240,62 +351,43 @@ winner,
     const updatedBracket: TournamentBracket = {
       ...bracket,
       matches: updatedMatches,
+      tournamentWinner,
       updatedAt: new Date().toISOString(),
     };
 
     saveBracket(updatedBracket);
     setBracket(updatedBracket);
-  }, [scores]);
+  }, [bracket, scores, selectedEventId]);
 
   const refreshBracket = () => {
-    const storedMatches = getMatches();
-
-    const eventMatches = storedMatches.filter(
-      (match) => match.eventId === assignedEvent.id
-    );
-
-    setMatches(eventMatches);
-
-    const scoreMap: Record<
-      string,
-      StoredScore | undefined
-    > = {};
-
-    eventMatches.forEach((match) => {
-      scoreMap[match.id] =
-        getScoreByMatchId(match.id);
-    });
-
-    setScores(scoreMap);
-
-    const updatedBracket =
-      getBracketByEventId(assignedEvent.id);
-
-    if (updatedBracket) {
-      setBracket(updatedBracket);
+    if (!selectedEventId) {
+      return;
     }
+
+    loadEventData(selectedEventId);
   };
 
   const handleFinalWinner = (winner: string) => {
-    if (!bracket) {
+    if (!bracket || !canManageBracket) {
       return;
     }
 
     const finalMatch = bracket.matches.find(
-      (match) => match.id === "final"
+      (match) => match.id === FINAL_MATCH_ID
     );
 
-    if (!finalMatch) {
-      return;
-    }
-
-    if (finalMatch.status !== "Ready") {
+    if (
+      !finalMatch ||
+      finalMatch.status !== "Ready" ||
+      (winner !== finalMatch.teamA &&
+        winner !== finalMatch.teamB)
+    ) {
       return;
     }
 
     const updatedMatches = bracket.matches.map(
       (match) =>
-        match.id === "final"
+        match.id === FINAL_MATCH_ID
           ? {
               ...match,
               status: "Completed" as const,
@@ -321,19 +413,34 @@ winner,
 
   const roundOneMatches =
     bracket?.matches.filter(
-      (match) => match.id !== "final"
+      (match) => match.id !== FINAL_MATCH_ID
     ) || [];
 
-  const finalMatch =
-    bracket?.matches.find(
-      (match) => match.id === "final"
+  const finalMatch = bracket?.matches.find(
+    (match) => match.id === FINAL_MATCH_ID
+  );
+
+  const handleEventChange = (
+    eventId: string
+  ) => {
+    setSelectedEventId(eventId);
+
+    const params = new URLSearchParams(
+      window.location.search
     );
+
+    params.set("eventId", eventId);
+
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}?${params.toString()}`
+    );
+  };
 
   return (
     <main className="min-h-screen bg-[#080a0f] px-4 py-8 text-white sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl">
-
-        {/* Header */}
         <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <h1 className="text-3xl font-bold">
@@ -346,16 +453,21 @@ winner,
             </p>
           </div>
 
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
             <button
               onClick={refreshBracket}
-              className="rounded-lg bg-blue-600 px-4 py-2 font-semibold hover:bg-blue-500"
+              disabled={!selectedEventId}
+              className="rounded-lg bg-blue-600 px-4 py-2 font-semibold hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Refresh Bracket
             </button>
 
             <Link
-              href="/scoring/matches"
+              href={
+                selectedEventId
+                  ? `/scoring/matches?eventId=${encodeURIComponent(selectedEventId)}`
+                  : "/scoring/matches"
+              }
               className="rounded-lg bg-gray-800 px-4 py-2 font-semibold hover:bg-gray-700"
             >
               Back to Matches
@@ -363,18 +475,60 @@ winner,
           </div>
         </div>
 
-        {/* Event */}
         <section className="mb-8 rounded-2xl border border-gray-800 bg-gray-900 p-6">
-          <p className="text-sm text-gray-400">
-            Event
-          </p>
+          <label
+            htmlFor="bracket-event"
+            className="text-sm text-gray-400"
+          >
+            Select Event
+          </label>
 
-          <h2 className="mt-1 text-2xl font-bold">
-            {assignedEvent.name}
-          </h2>
+          <select
+            id="bracket-event"
+            value={selectedEventId}
+            onChange={(event) =>
+              handleEventChange(event.target.value)
+            }
+            className="mt-2 w-full rounded-lg border border-gray-700 bg-gray-800 p-3 text-white md:max-w-xl"
+          >
+            {events.map((event) => (
+              <option
+                key={event.id}
+                value={event.id}
+              >
+                {event.name}
+              </option>
+            ))}
+          </select>
+
+          {selectedEvent && (
+            <p className="mt-3 text-sm text-gray-400">
+              Showing bracket for:{" "}
+              <span className="font-semibold text-white">
+                {selectedEvent.name}
+              </span>
+            </p>
+          )}
         </section>
 
-        {!bracket && (
+        {!isLoaded && (
+          <section className="rounded-2xl border border-gray-800 bg-gray-900 p-6 text-gray-400">
+            Loading bracket...
+          </section>
+        )}
+
+        {isLoaded && !selectedEvent && (
+          <section className="rounded-2xl border border-yellow-700 bg-yellow-950/30 p-6">
+            <h2 className="text-xl font-bold">
+              No events available
+            </h2>
+            <p className="mt-2 text-gray-400">
+              Create an event before viewing a tournament bracket.
+            </p>
+          </section>
+        )}
+
+        {isLoaded && selectedEvent && !bracket && (
           <section className="rounded-2xl border border-yellow-700 bg-yellow-950/30 p-6">
             <h2 className="text-xl font-bold">
               Bracket is not ready
@@ -382,14 +536,13 @@ winner,
 
             <p className="mt-2 text-gray-400">
               At least two matches are required for
-              the tournament bracket.
+              this tournament bracket.
             </p>
           </section>
         )}
 
-        {bracket && (
+        {isLoaded && bracket && (
           <>
-            {/* Round 1 */}
             <section className="mb-10">
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="text-2xl font-bold">
@@ -404,8 +557,9 @@ winner,
               <div className="grid gap-6 md:grid-cols-2">
                 {roundOneMatches.map(
                   (match, index) => {
-                    const score =
-                      scores[match.id];
+                    const score = scores[match.id];
+                    const published =
+                      isPublishedScore(score);
 
                     return (
                       <div
@@ -419,8 +573,7 @@ winner,
 
                           <span
                             className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                              match.status ===
-                              "Completed"
+                              match.status === "Completed"
                                 ? "bg-green-900 text-green-300"
                                 : "bg-yellow-900 text-yellow-300"
                             }`}
@@ -436,13 +589,7 @@ winner,
                             </span>
 
                             <span className="text-xl font-bold">
-                              {score &&
-                              (score.status ===
-                                "Submitted" ||
-                                score.status ===
-                                  "Locked")
-                                ? score.scoreA
-                                : "-"}
+                              {published ? score.scoreA : "-"}
                             </span>
                           </div>
 
@@ -452,21 +599,15 @@ winner,
                             </span>
 
                             <span className="text-xl font-bold">
-                              {score &&
-                              (score.status ===
-                                "Submitted" ||
-                                score.status ===
-                                  "Locked")
-                                ? score.scoreB
-                                : "-"}
+                              {published ? score.scoreB : "-"}
                             </span>
                           </div>
                         </div>
 
-                        <div className="mt-5 flex flex-wrap gap-3">
+                        <div className="mt-5">
                           <Link
-                            href={`/scoring/matches/${match.id}`}
-                            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold hover:bg-blue-500"
+                            href={`/scoring/matches/${match.id}?eventId=${encodeURIComponent(selectedEventId)}`}
+                            className="inline-block rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold hover:bg-blue-500"
                           >
                             Manage Score
                           </Link>
@@ -485,13 +626,8 @@ winner,
                         )}
 
                         {!match.winner &&
-                          score &&
-                          (score.status ===
-                            "Submitted" ||
-                            score.status ===
-                              "Locked") &&
-                          score.scoreA ===
-                            score.scoreB && (
+                          published &&
+                          score.scoreA === score.scoreB && (
                             <div className="mt-5 rounded-lg border border-red-700 bg-red-950/30 p-4">
                               <p className="text-sm font-semibold text-red-300">
                                 Match is tied.
@@ -510,7 +646,6 @@ winner,
               </div>
             </section>
 
-            {/* Final */}
             <section className="mb-10">
               <h2 className="mb-4 text-2xl font-bold">
                 Final
@@ -525,11 +660,9 @@ winner,
 
                     <span
                       className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                        finalMatch.status ===
-                        "Completed"
+                        finalMatch.status === "Completed"
                           ? "bg-green-900 text-green-300"
-                          : finalMatch.status ===
-                              "Ready"
+                          : finalMatch.status === "Ready"
                             ? "bg-blue-900 text-blue-300"
                             : "bg-yellow-900 text-yellow-300"
                       }`}
@@ -552,8 +685,7 @@ winner,
                     </div>
                   </div>
 
-                  {finalMatch.status ===
-                    "Ready" &&
+                  {finalMatch.status === "Ready" &&
                     canManageBracket && (
                       <div className="mt-6">
                         <p className="mb-3 text-sm text-gray-400">
@@ -563,9 +695,7 @@ winner,
                         <div className="grid gap-3 sm:grid-cols-2">
                           <button
                             onClick={() =>
-                              handleFinalWinner(
-                                finalMatch.teamA
-                              )
+                              handleFinalWinner(finalMatch.teamA)
                             }
                             className="rounded-lg bg-green-600 px-4 py-3 font-semibold hover:bg-green-500"
                           >
@@ -574,17 +704,14 @@ winner,
 
                           <button
                             onClick={() =>
-                              handleFinalWinner(
-                                finalMatch.teamB
-                              )
+                              handleFinalWinner(finalMatch.teamB)
                             }
                             className="rounded-lg bg-green-600 px-4 py-3 font-semibold hover:bg-green-500"
                           >
                             {finalMatch.teamB}
                           </button>
                         </div>
-                      </div>
-                    )}
+                      </div>)}
 
                   {finalMatch.winner && (
                     <div className="mt-6 rounded-xl border border-yellow-600 bg-yellow-950/30 p-5 text-center">
@@ -598,8 +725,7 @@ winner,
                     </div>
                   )}
 
-                  {finalMatch.status ===
-                    "Waiting" && (
+                  {finalMatch.status === "Waiting" && (
                     <div className="mt-6 rounded-lg border border-gray-700 bg-gray-800/50 p-4 text-center text-sm text-gray-400">
                       Both Round 1 matches must have
                       a winner before the final is ready.
@@ -607,10 +733,7 @@ winner,
                   )}
                 </div>
               )}
-            </section>
-
-            {/* Tournament Winner */}
-            {bracket.tournamentWinner && (
+            </section>    {bracket.tournamentWinner && (
               <section className="rounded-2xl border border-yellow-600 bg-yellow-950/20 p-8 text-center">
                 <p className="text-sm uppercase tracking-[0.2em] text-yellow-400">
                   Champion
