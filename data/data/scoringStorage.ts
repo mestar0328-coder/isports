@@ -10,76 +10,58 @@ import {
   canScoreEvent,
   getCurrentInchargeAccess,
 } from "../inchargeAuth";
+
 import { addScoreAudit } from "../scoreAudit";
-import * as scorePreparation from "../../lib/scoring/prepareEventScore";
+import { prepareEventScore } from "../../lib/scoring/prepareEventScore";
 
 const STORAGE_KEY = "isports_event_scores";
 
-type AthleteScoreRecord = EventScoreRecord & {
+type ExtendedScore = EventScoreRecord & {
   athleteId?: string;
   matchId?: string;
 };
-
-type PreparedEventScore = {
-  eventId: string;
-  matchId?: string;
-  athleteId?: string;
-  sportId?: string;
-  scoringEngine: EventScoreRecord["scoringEngine"];
-  data: SportScoreData;
-};
-
-type EventScorePreparer = (
-  event: SportEvent,
-  options?: { matchId: string; athleteId: string }
-) => PreparedEventScore;
-
-const prepareEventScore = (() => {
-  const exports = scorePreparation as unknown as Record<string, unknown>;
-  const candidate =
-    exports.prepareEventScore ??
-    exports.default ??
-    Object.values(exports).find((value) => typeof value === "function");
-
-  if (typeof candidate !== "function") {
-    throw new Error("No event score preparation function is available.");
-  }
-
-  return candidate as EventScorePreparer;
-})();
-
-function getScoreAthleteId(score: EventScoreRecord): string | undefined {
-  return (score as AthleteScoreRecord).athleteId;
-}
-
-function getScoreMatchId(score: EventScoreRecord): string | undefined {
-  return (score as AthleteScoreRecord).matchId;
-}
 
 export const SCORE_CORRECTION_WINDOW_MS = 45 * 60 * 1000;
 
-function createId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+// --------------------------------------------------
+// ID GENERATION
+// --------------------------------------------------
+
+function id(): string {
+  return typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-function readScores(): EventScoreRecord[] {
+const athleteId = (s: EventScoreRecord) =>
+  (s as ExtendedScore).athleteId;
+
+const matchId = (s: EventScoreRecord) =>
+  (s as ExtendedScore).matchId;
+
+// --------------------------------------------------
+// SCORE STORAGE
+// --------------------------------------------------
+
+function read(): EventScoreRecord[] {
   if (typeof window === "undefined") return [];
 
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (!stored) return [];
-    const parsed: unknown = JSON.parse(stored);
-    return Array.isArray(parsed) ? (parsed as EventScoreRecord[]) : [];
+    const value: unknown = JSON.parse(
+      localStorage.getItem(STORAGE_KEY) || "[]"
+    );
+
+    return Array.isArray(value)
+      ? (value as EventScoreRecord[])
+      : [];
   } catch (error) {
     console.error("Unable to read scores:", error);
     return [];
   }
 }
 
-function writeScores(scores: EventScoreRecord[]): void {
+function write(scores: EventScoreRecord[]): void {
   if (typeof window === "undefined") {
     throw new Error("Scores can only be saved in the browser.");
   }
@@ -92,13 +74,30 @@ function writeScores(scores: EventScoreRecord[]): void {
   }
 }
 
+// --------------------------------------------------
+// ACTOR AND EVENT AUTHORIZATION
+// --------------------------------------------------
+
 function requireActor(actorId: string, actorName: string): void {
   if (!actorId?.trim() || !actorName?.trim()) {
     throw new Error("The acting user's ID and name are required.");
   }
+
+  const access = getCurrentInchargeAccess();
+
+  if (
+    !access ||
+    access.userId !== actorId ||
+    access.userName.trim().toLowerCase() !==
+      actorName.trim().toLowerCase()
+  ) {
+    throw new Error(
+      "The current In-Charge identity does not match the active account."
+    );
+  }
 }
 
-function requireEventAccess(eventId: string): void {
+function requireEvent(eventId: string): void {
   if (!canScoreEvent(eventId)) {
     throw new Error(
       "Access denied. You must be an active, unexpired In-Charge assigned to this event."
@@ -106,133 +105,207 @@ function requireEventAccess(eventId: string): void {
   }
 }
 
-function canScoreEventForCurrentUser(
-  access: NonNullable<ReturnType<typeof getCurrentInchargeAccess>>
-): boolean {
-  return (
-    access.role === "Scoring Incharge" &&
-    access.accessType === "Temporary" &&
-    access.active &&
-    !access.expired
-  );
+// --------------------------------------------------
+// CENTRAL AUDIT
+// --------------------------------------------------
+
+function auditRef(s: EventScoreRecord): string {
+  return matchId(s)?.trim() || `event:${s.eventId}`;
 }
 
-function requireCurrentActor(actorId: string, actorName: string): void {
-  requireActor(actorId, actorName);
-  const access = getCurrentInchargeAccess();
+function audit(
+  s: EventScoreRecord,
+  action:
+    | "Score Saved"
+    | "Score Submitted"
+    | "Score Corrected"
+    | "Score Locked",
+  actorId: string,
+  actorName: string,
+  reason?: string
+): void {
+  const auditLog = Array.isArray(s.auditLog) ? s.auditLog : [];
+  const last = auditLog[auditLog.length - 1];
 
-  if (
-    !access ||
-    !canScoreEventForCurrentUser(access) ||
-    access.userName.trim().toLowerCase() !== actorName.trim().toLowerCase()
-  ) {
-    throw new Error("The current In-Charge is not authorized to score.");
-  }
+  // Central audit errors intentionally propagate.
+  // They must not be silently ignored.
+  addScoreAudit(auditRef(s), action, actorName, {
+    eventId: s.eventId,
+    scoreRecordId: s.id,
+    athleteId: athleteId(s),
+    actorId,
+    scoringEngine: String(s.scoringEngine),
+    status: s.status,
+    scoreData: s.data,
+    previousValue: last?.previousValue,
+    newValue: last?.newValue,
+    reason: reason?.trim() || last?.reason,
+  });
 }
 
-function createAuditEntry(
-  entry: Omit<ScoreAuditEntry, "id" | "timestamp">
+// --------------------------------------------------
+// INTERNAL AUDIT LOG
+// --------------------------------------------------
+
+function entry(
+  data: Omit<ScoreAuditEntry, "id" | "timestamp">
 ): ScoreAuditEntry {
   return {
-    ...entry,
-    id: createId(),
+    ...data,
+    id: id(),
     timestamp: new Date().toISOString(),
   };
 }
 
-/*
- * Store a snapshot in the central Admin Audit record.
- * The score record's auditLog remains the detailed source of truth.
- */
-function recordAdminAudit(
-  score: EventScoreRecord,
-  action: "Score Saved" | "Score Submitted" | "Score Corrected" | "Score Locked",
-  actorName: string
-): void {
-  const matchId = getScoreMatchId(score);
-  if (!matchId) return;
+// --------------------------------------------------
+// CORRECTION WINDOW
+// --------------------------------------------------
 
-  const latestEntry = score.auditLog[score.auditLog.length - 1];
-
-  try {
-    addScoreAudit(matchId, action, actorName, {
-      eventId: score.eventId,
-      scoreRecordId: score.id,
-      athleteId: getScoreAthleteId(score),
-      scoringEngine: String(score.scoringEngine),
-      status: score.status,
-      // Snapshot the data at the time of this audit action.
-      scoreData: score.data,
-      previousValue: latestEntry?.previousValue,
-      newValue: latestEntry?.newValue,
-      reason: latestEntry?.reason,
-    });
-  } catch (error) {
-    // Do not discard a successfully persisted score if the summary log fails.
-    console.error("Unable to write central Admin Audit entry:", error);
-  }
-}
-
-function requireCorrectionWindow(score: EventScoreRecord): void {
-  if (score.status !== "submitted" || !score.submittedAt) {
+function correctionWindow(s: EventScoreRecord): void {
+  if (s.status !== "submitted" || !s.submittedAt) {
     throw new Error("Only submitted scores can be corrected.");
   }
 
-  const submittedTime = new Date(score.submittedAt).getTime();
+  const submittedTime = new Date(s.submittedAt).getTime();
 
-  if (
-    !Number.isFinite(submittedTime) ||
-    Date.now() - submittedTime >= SCORE_CORRECTION_WINDOW_MS
-  ) {
-    throw new Error("The 45-minute score correction window has expired.");
+  if (!Number.isFinite(submittedTime)) {
+    throw new Error("Invalid score submission timestamp.");
+  }
+
+  const elapsed = Date.now() - submittedTime;
+
+  if (elapsed < 0 || elapsed >= SCORE_CORRECTION_WINDOW_MS) {
+    throw new Error(
+      "The 45-minute score correction window has expired or is invalid."
+    );
   }
 }
 
-// READ FUNCTIONS
+// --------------------------------------------------
+// AUTOMATIC SCORE LOCKING
+// --------------------------------------------------
+
+function reconcileLocks(): EventScoreRecord[] {
+  const now = Date.now();
+  let changed = false;
+
+  const result = read().map((score) => {
+    if (score.status !== "submitted" || !score.submittedAt) {
+      return score;
+    }
+
+    const submittedTime = new Date(score.submittedAt).getTime();
+
+    if (!Number.isFinite(submittedTime)) {
+      return score;
+    }
+
+    if (now - submittedTime < SCORE_CORRECTION_WINDOW_MS) {
+      return score;
+    }
+
+    changed = true;
+
+    const when = new Date(now).toISOString();
+
+    const locked: EventScoreRecord = {
+      ...score,
+      status: "locked",
+      lockedAt: when,
+      lockedBy: "system",
+      updatedAt: when,
+      auditLog: [
+        ...score.auditLog,
+        entry({
+          action: "score_locked",
+          actorId: "system",
+          actorName: "System (automatic lock)",
+          previousValue: "submitted",
+          newValue: "locked",
+          reason: "45-minute correction window elapsed.",
+        }),
+      ],
+    };
+
+    audit(
+      locked,
+      "Score Locked",
+      "system",
+      "System (automatic lock)",
+      "45-minute correction window elapsed."
+    );
+
+    return locked;
+  });
+
+  if (changed && typeof window !== "undefined") {
+    write(result);
+  }
+
+  return result;
+}
+
+// --------------------------------------------------
+// SCORE READ FUNCTIONS
+// --------------------------------------------------
 
 export function getAllScores(): EventScoreRecord[] {
-  return readScores();
+  return reconcileLocks();
 }
 
-export function getScoresByEvent(eventId: string): EventScoreRecord[] {
-  return readScores().filter((score) => score.eventId === eventId);
+export function getScoresByEvent(
+  eventId: string
+): EventScoreRecord[] {
+  return getAllScores().filter(
+    (score) => score.eventId === eventId
+  );
 }
 
-export function getScoresByMatch(matchId: string): EventScoreRecord[] {
-  return readScores().filter((score) => getScoreMatchId(score) === matchId);
+export function getScoresByMatch(
+  id: string
+): EventScoreRecord[] {
+  return getAllScores().filter(
+    (score) => matchId(score) === id
+  );
 }
 
 export function getScoresByAthlete(
   eventId: string,
-  athleteId: string
+  athlete: string
 ): EventScoreRecord[] {
-  return readScores().filter(
+  return getAllScores().filter(
     (score) =>
       score.eventId === eventId &&
-      getScoreAthleteId(score) === athleteId
+      athleteId(score) === athlete
   );
 }
 
 export function getScoreByMatchAndAthlete(
-  matchId: string,
-  athleteId: string
+  match: string,
+  athlete: string
 ): EventScoreRecord | null {
   return (
-    readScores().find(
+    getAllScores().find(
       (score) =>
-        getScoreMatchId(score) === matchId &&
-        getScoreAthleteId(score) === athleteId
+        matchId(score) === match &&
+        athleteId(score) === athlete
     ) ?? null
   );
 }
 
-export function getScoreById(scoreId: string): EventScoreRecord | null {
-  return readScores().find((score) => score.id === scoreId) ?? null;
+export function getScoreById(
+  scoreId: string
+): EventScoreRecord | null {
+  return (
+    getAllScores().find((score) => score.id === scoreId) ?? null
+  );
 }
 
-// CREATE SCORES
+// --------------------------------------------------
+// CREATE SCORE
+// --------------------------------------------------
 
-type CreateScoreInput = {
+type CreateInput = {
   eventId: string;
   scoringEngine: EventScoreRecord["scoringEngine"];
   data: SportScoreData;
@@ -243,25 +316,24 @@ type CreateScoreInput = {
   actorName: string;
 };
 
-export function createScore(input: CreateScoreInput): EventScoreRecord {
-  if (typeof window === "undefined") {
-    throw new Error("Scores can only be created in the browser.");
-  }
+export function createScore(
+  input: CreateInput
+): EventScoreRecord {
+  requireActor(input.actorId, input.actorName);
+  requireEvent(input.eventId);
 
-  requireCurrentActor(input.actorId, input.actorName);
-  requireEventAccess(input.eventId);
+  const match = input.matchId?.trim() || undefined;
+  const athlete = input.athleteId?.trim() || undefined;
 
-  const matchId = input.matchId?.trim() || undefined;
-  const athleteId = input.athleteId?.trim() || undefined;
-  const scores = readScores();
+  const scores = getAllScores();
 
   if (
-    matchId &&
-    athleteId &&
+    match &&
+    athlete &&
     scores.some(
       (score) =>
-        getScoreMatchId(score) === matchId &&
-        getScoreAthleteId(score) === athleteId
+        matchId(score) === match &&
+        athleteId(score) === athlete
     )
   ) {
     throw new Error(
@@ -271,11 +343,11 @@ export function createScore(input: CreateScoreInput): EventScoreRecord {
 
   const now = new Date().toISOString();
 
-  const record: AthleteScoreRecord = {
-    id: createId(),
+  const record: ExtendedScore = {
+    id: id(),
     eventId: input.eventId,
-    matchId,
-    athleteId,
+    matchId: match,
+    athleteId: athlete,
     sportId: input.sportId,
     scoringEngine: input.scoringEngine,
     status: "draft",
@@ -283,7 +355,7 @@ export function createScore(input: CreateScoreInput): EventScoreRecord {
     createdAt: now,
     updatedAt: now,
     auditLog: [
-      createAuditEntry({
+      entry({
         action: "score_created",
         actorId: input.actorId,
         actorName: input.actorName,
@@ -292,17 +364,29 @@ export function createScore(input: CreateScoreInput): EventScoreRecord {
     ],
   };
 
-  writeScores([...scores, record]);
-  recordAdminAudit(record, "Score Saved", input.actorName);
+  write([...scores, record]);
+
+  audit(
+    record,
+    "Score Saved",
+    input.actorId,
+    input.actorName
+  );
+
   return record;
 }
+
+// --------------------------------------------------
+// CREATE SCORE FOR EVENT
+// --------------------------------------------------
 
 export function createScoreForEvent(
   event: SportEvent,
   actorId: string,
   actorName: string
 ): EventScoreRecord {
-  requireEventAccess(event.id);
+  requireEvent(event.id);
+
   const prepared = prepareEventScore(event);
 
   return createScore({
@@ -315,18 +399,27 @@ export function createScoreForEvent(
   });
 }
 
+// --------------------------------------------------
+// CREATE SCORE FOR MATCH AND ATHLETE
+// --------------------------------------------------
+
 export function createScoreForMatchAthlete(
   event: SportEvent,
-  matchId: string,
-  athleteId: string,
+  match: string,
+  athlete: string,
   actorId: string,
   actorName: string
 ): EventScoreRecord {
-  if (!matchId.trim()) throw new Error("A match ID is required.");
-  if (!athleteId.trim()) throw new Error("An athlete ID is required.");
+  if (!match.trim() || !athlete.trim()) {
+    throw new Error("A match ID and athlete ID are required.");
+  }
 
-  requireEventAccess(event.id);
-  const prepared = prepareEventScore(event, { matchId, athleteId });
+  requireEvent(event.id);
+
+  const prepared = prepareEventScore(event, {
+    matchId: match,
+    athleteId: athlete,
+  });
 
   return createScore({
     eventId: prepared.eventId,
@@ -340,7 +433,9 @@ export function createScoreForMatchAthlete(
   });
 }
 
+// --------------------------------------------------
 // UPDATE DRAFT SCORE
+// --------------------------------------------------
 
 export function updateDraftScore(
   scoreId: string,
@@ -349,34 +444,38 @@ export function updateDraftScore(
   actorName: string,
   reason: string
 ): EventScoreRecord {
-  requireCurrentActor(actorId, actorName);
+  requireActor(actorId, actorName);
 
-  if (!reason?.trim()) {
+  if (!reason.trim()) {
     throw new Error("Please provide a reason for the score change.");
   }
 
-  const scores = readScores();
+  const scores = getAllScores();
   const index = scores.findIndex((score) => score.id === scoreId);
-  if (index === -1) throw new Error("Score record not found.");
 
-  const current = scores[index];
-  requireEventAccess(current.eventId);
+  if (index < 0) {
+    throw new Error("Score record not found.");
+  }
 
-  if (current.status !== "draft") {
+  const old = scores[index];
+
+  requireEvent(old.eventId);
+
+  if (old.status !== "draft") {
     throw new Error("Only draft scores can be edited here.");
   }
 
   const updated: EventScoreRecord = {
-    ...current,
+    ...old,
     data,
     updatedAt: new Date().toISOString(),
     auditLog: [
-      ...current.auditLog,
-      createAuditEntry({
+      ...old.auditLog,
+      entry({
         action: "draft_score_updated",
         actorId,
         actorName,
-        previousValue: current.data,
+        previousValue: old.data,
         newValue: data,
         reason: reason.trim(),
       }),
@@ -384,58 +483,83 @@ export function updateDraftScore(
   };
 
   scores[index] = updated;
-  writeScores(scores);
-  recordAdminAudit(updated, "Score Saved", actorName);
+
+  write(scores);
+
+  audit(
+    updated,
+    "Score Saved",
+    actorId,
+    actorName,
+    reason.trim()
+  );
+
   return updated;
 }
 
+// --------------------------------------------------
 // SUBMIT SCORE
+// --------------------------------------------------
 
 export function submitScore(
   scoreId: string,
   actorId: string,
   actorName: string
 ): EventScoreRecord {
-  requireCurrentActor(actorId, actorName);
+  requireActor(actorId, actorName);
 
-  const scores = readScores();
+  const scores = getAllScores();
   const index = scores.findIndex((score) => score.id === scoreId);
-  if (index === -1) throw new Error("Score record not found.");
 
-  const current = scores[index];
-  requireEventAccess(current.eventId);
+  if (index < 0) {
+    throw new Error("Score record not found.");
+  }
 
-  if (current.status !== "draft") {
+  const old = scores[index];
+
+  requireEvent(old.eventId);
+
+  if (old.status !== "draft") {
     throw new Error("Only draft scores can be submitted.");
   }
 
   const now = new Date().toISOString();
 
   const updated: EventScoreRecord = {
-    ...current,
+    ...old,
     status: "submitted",
     submittedAt: now,
     submittedBy: actorId,
     updatedAt: now,
     auditLog: [
-      ...current.auditLog,
-      createAuditEntry({
+      ...old.auditLog,
+      entry({
         action: "score_submitted",
         actorId,
         actorName,
-        previousValue: current.status,
+        previousValue: old.status,
         newValue: "submitted",
       }),
     ],
   };
 
   scores[index] = updated;
-  writeScores(scores);
-  recordAdminAudit(updated, "Score Submitted", actorName);
+
+  write(scores);
+
+  audit(
+    updated,
+    "Score Submitted",
+    actorId,
+    actorName
+  );
+
   return updated;
 }
 
+// --------------------------------------------------
 // CORRECT SUBMITTED SCORE
+// --------------------------------------------------
 
 export function correctSubmittedScore(
   scoreId: string,
@@ -444,31 +568,35 @@ export function correctSubmittedScore(
   actorName: string,
   reason: string
 ): EventScoreRecord {
-  requireCurrentActor(actorId, actorName);
+  requireActor(actorId, actorName);
 
-  if (!reason?.trim()) {
+  if (!reason.trim()) {
     throw new Error("Please provide a reason for the correction.");
   }
 
-  const scores = readScores();
+  const scores = getAllScores();
   const index = scores.findIndex((score) => score.id === scoreId);
-  if (index === -1) throw new Error("Score record not found.");
 
-  const current = scores[index];
-  requireEventAccess(current.eventId);
-  requireCorrectionWindow(current);
+  if (index < 0) {
+    throw new Error("Score record not found.");
+  }
+
+  const old = scores[index];
+
+  requireEvent(old.eventId);
+  correctionWindow(old);
 
   const updated: EventScoreRecord = {
-    ...current,
+    ...old,
     data,
     updatedAt: new Date().toISOString(),
     auditLog: [
-      ...current.auditLog,
-      createAuditEntry({
+      ...old.auditLog,
+      entry({
         action: "submitted_score_corrected",
         actorId,
         actorName,
-        previousValue: current.data,
+        previousValue: old.data,
         newValue: data,
         reason: reason.trim(),
       }),
@@ -476,63 +604,98 @@ export function correctSubmittedScore(
   };
 
   scores[index] = updated;
-  writeScores(scores);
-  recordAdminAudit(updated, "Score Corrected", actorName);
+
+  write(scores);
+
+  audit(
+    updated,
+    "Score Corrected",
+    actorId,
+    actorName,
+    reason.trim()
+  );
+
   return updated;
 }
 
-// LOCK SCORE
+// --------------------------------------------------
+// MANUAL SCORE LOCK
+// --------------------------------------------------
 
 export function lockScore(
   scoreId: string,
   actorId: string,
   actorName: string
 ): EventScoreRecord {
-  requireCurrentActor(actorId, actorName);
+  requireActor(actorId, actorName);
 
-  const scores = readScores();
+  const scores = getAllScores();
   const index = scores.findIndex((score) => score.id === scoreId);
-  if (index === -1) throw new Error("Score record not found.");
 
-  const current = scores[index];
-  requireEventAccess(current.eventId);
+  if (index < 0) {
+    throw new Error("Score record not found.");
+  }
 
-  if (current.status !== "submitted") {
+  const old = scores[index];
+
+  requireEvent(old.eventId);
+
+  if (old.status !== "submitted") {
     throw new Error("Only submitted scores can be locked.");
   }
 
   const now = new Date().toISOString();
 
   const updated: EventScoreRecord = {
-    ...current,
+    ...old,
     status: "locked",
     lockedAt: now,
     lockedBy: actorId,
     updatedAt: now,
     auditLog: [
-      ...current.auditLog,
-      createAuditEntry({
+      ...old.auditLog,
+      entry({
         action: "score_locked",
         actorId,
         actorName,
-        previousValue: current.status,
+        previousValue: old.status,
         newValue: "locked",
       }),
     ],
   };
 
   scores[index] = updated;
-  writeScores(scores);
-  recordAdminAudit(updated, "Score Locked", actorName);
+
+  write(scores);
+
+  audit(
+    updated,
+    "Score Locked",
+    actorId,
+    actorName
+  );
+
   return updated;
 }
 
-// AUDIT AND STATUS
+// --------------------------------------------------
+// SCORE AUDIT READ
+// --------------------------------------------------
 
-export function getScoreAuditLog(scoreId: string): ScoreAuditEntry[] {
+export function getScoreAuditLog(
+  scoreId: string
+): ScoreAuditEntry[] {
   return getScoreById(scoreId)?.auditLog ?? [];
 }
 
-export function getScoresByStatus(status: ScoreStatus): EventScoreRecord[] {
-  return readScores().filter((score) => score.status === status);
+// --------------------------------------------------
+// FILTER SCORES BY STATUS
+// --------------------------------------------------
+
+export function getScoresByStatus(
+  status: ScoreStatus
+): EventScoreRecord[] {
+  return getAllScores().filter(
+    (score) => score.status === status
+  );
 }

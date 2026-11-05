@@ -1,81 +1,104 @@
 export type ScoreStatus =
-  | "Draft"
-  | "Submitted"
-  | "Locked";
+| "Draft"
+| "Submitted"
+| "Locked";
 
 export type StoredScore = {
-  matchId: string;
-  teamA: string;
-  teamB: string;
-  scoreA: number;
-  scoreB: number;
-  status: ScoreStatus;
-  updatedAt: string;
+matchId: string;
+teamA: string;
+teamB: string;
+scoreA: number;
+scoreB: number;
+status: ScoreStatus;
+updatedAt: string;
 };
 
 const STORAGE_KEY = "isports_scores";
 
 export function getScores(): StoredScore[] {
-  if (typeof window === "undefined") {
-    return [];
-  }
+if (typeof window === "undefined") return [];
 
-  const stored = localStorage.getItem(STORAGE_KEY);
+try {
+const stored = localStorage.getItem(STORAGE_KEY);
+if (!stored) return [];
 
-  if (!stored) {
-    return [];
-  }
+const parsed: unknown = JSON.parse(stored);
+if (!Array.isArray(parsed)) return [];
 
-  try {
-    return JSON.parse(stored);
-  } catch {
-    return [];
-  }
+return parsed.filter(
+  (item): item is StoredScore =>
+    !!item &&
+    typeof item === "object" &&
+    typeof item.matchId === "string" &&
+    typeof item.scoreA === "number" &&
+    typeof item.scoreB === "number" &&
+    ["Draft", "Submitted", "Locked"].includes(item.status)
+);
+
+} catch (error) {
+console.error("Unable to read scores:", error);
+return [];
+}
 }
 
 export function saveScores(scores: StoredScore[]) {
-  if (typeof window === "undefined") {
-    return;
-  }
+if (typeof window === "undefined") return;
 
-  localStorage.setItem(
-    STORAGE_KEY,
-    JSON.stringify(scores)
-  );
+localStorage.setItem(STORAGE_KEY, JSON.stringify(scores));
 }
 
 export function saveScore(score: StoredScore) {
-  const scores = getScores();
+if (typeof window === "undefined") {
+throw new Error("Scores can only be saved in the browser.");
+}
 
-  const existingIndex = scores.findIndex(
-    (item) => item.matchId === score.matchId
-  );
+if (!score.matchId.trim()) {
+throw new Error("A valid match ID is required.");
+}
 
-  if (existingIndex >= 0) {
-    scores[existingIndex] = score;
-  } else {
-    scores.push(score);
-  }
+const scores = getScores();
 
-  saveScores(scores);
+const existingIndex = scores.findIndex(
+(item) => item.matchId === score.matchId
+);
+
+const existing = existingIndex >= 0
+? scores[existingIndex]
+: undefined;
+
+if (existing?.status === "Locked") {
+throw new Error("This score is locked and cannot be modified.");
+}
+
+if (existingIndex >= 0) {
+scores[existingIndex] = score;
+} else {
+scores.push(score);
+}
+
+saveScores(scores);
 }
 
 export function getScoreByMatchId(
-  matchId: string
+matchId: string
 ): StoredScore | undefined {
-  const scores = getScores();
-
-  return scores.find(
-    (score) => score.matchId === matchId
-  );
+return getScores().find(
+(score) => score.matchId === matchId
+);
 }
 
 export function deleteScore(matchId: string) {
-  const scores = getScores();
+const scores = getScores();
 
-  const updatedScores = scores.filter(
-    (score) => score.matchId !== matchId
-  );
+const existing = scores.find(
+(score) => score.matchId === matchId
+);
 
-  saveScores(updatedScores);
+if (existing?.status === "Locked") {
+throw new Error("A locked score cannot be deleted.");
+}
+
+saveScores(
+scores.filter((score) => score.matchId !== matchId)
+);
 }

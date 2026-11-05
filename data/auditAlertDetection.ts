@@ -4,348 +4,239 @@ import {
 } from "./scoreAudit";
 
 import {
-  addAuditAlert,
   getAuditAlerts,
+  saveAuditAlerts,
   type AuditAlert,
 } from "./auditAlertStorage";
 
-const REPEATED_CORRECTION_LIMIT = 3;
-const HIGH_ACTIVITY_LIMIT = 5;
-const RAPID_CORRECTION_WINDOW =
-  10 * 60 * 1000;
+const REPEATED = 3;
+const HIGH_ACTIVITY = 5;
+const RAPID_MS = 10 * 60 * 1000;
 
-function parseAuditDate(
-  timestamp: string
-): Date | null {
-  if (!timestamp) {
-    return null;
+const time = (value: string): number | null => {
+  const result = new Date(value).getTime();
+  return Number.isFinite(result) ? result : null;
+};
+
+const actor = (a: ScoreAudit) =>
+  a.actorId || a.performedBy.trim().toLowerCase();
+
+const scope = (a: ScoreAudit) =>
+  `${a.eventId || "no-event"}::${a.matchId || "event-only"}`;
+
+function alertIdentity(
+  alert: Pick<
+    AuditAlert,
+    "type" | "eventId" | "matchId" | "actorId" | "performedBy"
+  >
+): string {
+  const event = alert.eventId || "no-event";
+  const match = alert.matchId || "event-only";
+
+  if (alert.type === "Repeated Corrections") {
+    return `${alert.type}::${event}::${match}`;
   }
 
-  const date = new Date(timestamp);
+  if (alert.type === "Rapid Corrections") {
+    const actorKey =
+      alert.actorId || alert.performedBy.trim().toLowerCase();
 
-  if (!Number.isNaN(date.getTime())) {
-    return date;
+    return `${alert.type}::${event}::${match}::${actorKey}`;
   }
 
-  const parsed = Date.parse(timestamp);
+  const actorKey =
+    alert.actorId || alert.performedBy.trim().toLowerCase();
 
-  if (!Number.isNaN(parsed)) {
-    return new Date(parsed);
-  }
-
-  return null;
+  return `${alert.type}::${actorKey}`;
 }
 
-function createAlertId(
-  type: string,
-  matchId: string,
-  performedBy: string
-) {
-  return `ALERT-${type
+function createAlertId(identity: string): string {
+  const type = identity.split("::")[0]
     .replaceAll(" ", "-")
-    .toUpperCase()}-${matchId}-${performedBy}`;
-}
+    .toUpperCase();
 
-function sortByDate(
-  audits: ScoreAudit[]
-) {
-  return [...audits].sort((a, b) => {
-    const dateA =
-      parseAuditDate(a.timestamp)?.getTime() ||
-      0;
-
-    const dateB =
-      parseAuditDate(b.timestamp)?.getTime() ||
-      0;
-
-    return dateA - dateB;
-  });
+  return `ALERT-${type}-${encodeURIComponent(identity)}`;
 }
 
 export function detectAuditAlerts(): AuditAlert[] {
-  const audits = getScoreAudit();
+  const corrections = getScoreAudit().filter(
+    (a) => a.action === "Score Corrected"
+  );
 
-  if (!audits.length) {
-    return getAuditAlerts();
+  const existing = getAuditAlerts();
+
+  // Consolidate previously stored duplicates.
+  const alertMap = new Map<string, AuditAlert>();
+
+  for (const alert of existing) {
+    const identity = alertIdentity(alert);
+    const previous = alertMap.get(identity);
+
+    if (!previous) {
+      alertMap.set(identity, alert);
+      continue;
+    }
+
+    // Preserve an existing review decision.
+    const reviewed =
+      previous.status !== "Pending Review"
+        ? previous
+        : alert.status !== "Pending Review"
+          ? alert
+          : previous;
+
+    alertMap.set(identity, {
+      ...previous,
+      status: reviewed.status,
+      reviewedAt: reviewed.reviewedAt,
+      reviewedBy: reviewed.reviewedBy,
+      detectedAt:
+        previous.detectedAt < alert.detectedAt
+          ? previous.detectedAt
+          : alert.detectedAt,
+    });
   }
 
-  const corrections = audits.filter(
-    (audit) =>
-      audit.action === "Score Corrected"
-  );
+  const emit = (
+    items: ScoreAudit[],
+    type: AuditAlert["type"],
+    severity: AuditAlert["severity"],
+    reason: string
+  ) => {
+    if (!items.length) return;
 
-  const existingAlerts = getAuditAlerts();
+    const latest = [...items].sort(
+      (a, b) =>
+        (time(a.timestamp) ?? 0) -
+        (time(b.timestamp) ?? 0)
+    ).at(-1);
 
-  const existingIds = new Set(
-    existingAlerts.map(
-      (alert) => alert.id
-    )
-  );
+    if (!latest) return;
 
-  const newAlerts: AuditAlert[] = [];
+    const candidate: AuditAlert = {
+      id: "",
+      type,
+      severity,
+      matchId: latest.matchId,
+      eventId: latest.eventId,
+      actorId: latest.actorId,
+      performedBy: latest.performedBy,
+      reason,
+      detectedAt: new Date().toISOString(),
+      status: "Pending Review",
+    };
 
-  /*
-   * --------------------------------------------------
-   * 1. REPEATED CORRECTIONS
-   * --------------------------------------------------
-   */
+    const identity = alertIdentity(candidate);
+    const previous = alertMap.get(identity);
 
-  const correctionsByMatch =
-    new Map<string, ScoreAudit[]>();
+    candidate.id = createAlertId(identity);
 
-  corrections.forEach((audit) => {
-    const current =
-      correctionsByMatch.get(
-        audit.matchId
-      ) || [];
+    alertMap.set(identity, {
+      ...candidate,
+      id: candidate.id,
 
-    current.push(audit);
+      // Keep original detection time and review decision.
+      detectedAt: previous?.detectedAt ?? candidate.detectedAt,
+      status: previous?.status ?? "Pending Review",
+      reviewedAt: previous?.reviewedAt,
+      reviewedBy: previous?.reviewedBy,
+    });
+  };
 
-    correctionsByMatch.set(
-      audit.matchId,
-      current
-    );
-  });
+  // 1. Repeated corrections per event/match.
+  const byScope = new Map<string, ScoreAudit[]>();
 
-  correctionsByMatch.forEach(
-    (matchAudits, matchId) => {
-      if (
-        matchAudits.length <
-        REPEATED_CORRECTION_LIMIT
-      ) {
-        return;
-      }
+  for (const correction of corrections) {
+    const key = scope(correction);
 
-      const sorted =
-        sortByDate(matchAudits);
-
-      const latest =
-        sorted[sorted.length - 1];
-
-      const alertId =
-        createAlertId(
-          "Repeated Corrections",
-          matchId,
-          latest.performedBy
-        );
-
-      if (existingIds.has(alertId)) {
-        return;
-      }
-
-      const alert: AuditAlert = {
-        id: alertId,
-        type:
-          "Repeated Corrections",
-        severity: "High",
-        matchId,
-        performedBy:
-          latest.performedBy,
-        reason:
-          `${matchAudits.length} score corrections were detected for this match.`,
-        detectedAt:
-          new Date().toISOString(),
-        status:
-          "Pending Review",
-      };
-
-      addAuditAlert(alert);
-
-      newAlerts.push(alert);
-
-      existingIds.add(alertId);
+    if (!byScope.has(key)) {
+      byScope.set(key, []);
     }
-  );
 
-  /*
-   * --------------------------------------------------
-   * 2. RAPID CORRECTIONS
-   *
-   * Only corrections made by the SAME
-   * In-Charge within 10 minutes are flagged.
-   * --------------------------------------------------
-   */
+    byScope.get(key)!.push(correction);
+  }
 
-  const correctionsByMatchAndUser =
-    new Map<
-      string,
-      ScoreAudit[]
-    >();
-
-  corrections.forEach((audit) => {
-    const key =
-      `${audit.matchId}::${audit.performedBy}`;
-
-    const current =
-      correctionsByMatchAndUser.get(
-        key
-      ) || [];
-
-    current.push(audit);
-
-    correctionsByMatchAndUser.set(
-      key,
-      current
-    );
-  });
-
-  correctionsByMatchAndUser.forEach(
-    (matchAudits, key) => {
-      const [
-        matchId,
-        performedBy,
-      ] = key.split("::");
-
-      const sorted =
-        sortByDate(matchAudits);
-
-      for (
-        let i = 1;
-        i < sorted.length;
-        i++
-      ) {
-        const previous =
-          parseAuditDate(
-            sorted[i - 1].timestamp
-          );
-
-        const current =
-          parseAuditDate(
-            sorted[i].timestamp
-          );
-
-        if (!previous || !current) {
-          continue;
-        }
-
-        const difference =
-          current.getTime() -
-          previous.getTime();
-
-        if (
-          difference <=
-          RAPID_CORRECTION_WINDOW
-        ) {
-          const alertId =
-            createAlertId(
-              "Rapid Corrections",
-              matchId,
-              performedBy
-            );
-
-          if (
-            !existingIds.has(alertId)
-          ) {
-            const alert: AuditAlert = {
-              id: alertId,
-              type:
-                "Rapid Corrections",
-              severity: "Medium",
-              matchId,
-              performedBy,
-              reason:
-                "Multiple score corrections were detected by the same In-Charge within a 10-minute period.",
-              detectedAt:
-                new Date().toISOString(),
-              status:
-                "Pending Review",
-            };
-
-            addAuditAlert(alert);
-
-            newAlerts.push(alert);
-
-            existingIds.add(
-              alertId
-            );
-          }
-
-          break;
-        }
-      }
+  for (const [, items] of byScope) {
+    if (items.length >= REPEATED) {
+      emit(
+        items,
+        "Repeated Corrections",
+        "High",
+        `${items.length} score corrections were detected in this event/match scope.`
+      );
     }
-  );
+  }
 
-  /*
-   * --------------------------------------------------
-   * 3. HIGH CORRECTION ACTIVITY
-   * --------------------------------------------------
-   */
+  // 2. Rapid corrections by the same actor.
+  const byActorScope = new Map<string, ScoreAudit[]>();
 
-  const correctionsByUser =
-    new Map<
-      string,
-      ScoreAudit[]
-    >();
+  for (const correction of corrections) {
+    const key = `${scope(correction)}::${actor(correction)}`;
 
-  corrections.forEach((audit) => {
-    const current =
-      correctionsByUser.get(
-        audit.performedBy
-      ) || [];
-
-    current.push(audit);
-
-    correctionsByUser.set(
-      audit.performedBy,
-      current
-    );
-  });
-
-  correctionsByUser.forEach(
-    (userAudits, performedBy) => {
-      if (
-        userAudits.length <
-        HIGH_ACTIVITY_LIMIT
-      ) {
-        return;
-      }
-
-      const sorted =
-        sortByDate(userAudits);
-
-      const firstMatch =
-        sorted[0]?.matchId ||
-        "unknown";
-
-      const alertId =
-        createAlertId(
-          "High Correction Activity",
-          firstMatch,
-          performedBy
-        );
-
-      if (
-        existingIds.has(alertId)
-      ) {
-        return;
-      }
-
-      const alert: AuditAlert = {
-        id: alertId,
-        type:
-          "High Correction Activity",
-        severity: "High",
-        matchId: firstMatch,
-        performedBy,
-        reason:
-          `${userAudits.length} score corrections were performed by this In-Charge.`,
-        detectedAt:
-          new Date().toISOString(),
-        status:
-          "Pending Review",
-      };
-
-      addAuditAlert(alert);
-
-      newAlerts.push(alert);
-
-      existingIds.add(alertId);
+    if (!byActorScope.has(key)) {
+      byActorScope.set(key, []);
     }
-  );
 
-  return [
-    ...existingAlerts,
-    ...newAlerts,
-  ];
+    byActorScope.get(key)!.push(correction);
+  }
+
+  for (const [, items] of byActorScope) {
+    const sorted = [...items].sort(
+      (a, b) =>
+        (time(a.timestamp) ?? 0) -
+        (time(b.timestamp) ?? 0)
+    );
+
+    const rapid = sorted.some((item, index) => {
+      if (index === 0) return false;
+
+      const current = time(item.timestamp);
+      const previous = time(sorted[index - 1].timestamp);
+
+      return (
+        current !== null &&
+        previous !== null &&
+        current - previous <= RAPID_MS
+      );
+    });
+
+    if (rapid) {
+      emit(
+        items,
+        "Rapid Corrections",
+        "Medium",
+        "Multiple score corrections were detected by the same In-Charge within a 10-minute period."
+      );
+    }
+  }
+
+  // 3. High correction activity across events/matches.
+  const byActor = new Map<string, ScoreAudit[]>();
+
+  for (const correction of corrections) {
+    const key = actor(correction);
+
+    if (!byActor.has(key)) {
+      byActor.set(key, []);
+    }
+
+    byActor.get(key)!.push(correction);
+  }
+
+  for (const [, items] of byActor) {
+    if (items.length >= HIGH_ACTIVITY) {
+      emit(
+        items,
+        "High Correction Activity",
+        "High",
+        `${items.length} score corrections were performed by this In-Charge across events/matches.`
+      );
+    }
+  }
+
+  const result = Array.from(alertMap.values());
+
+  saveAuditAlerts(result);
+
+  return result;
 }

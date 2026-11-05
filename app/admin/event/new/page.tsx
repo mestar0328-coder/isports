@@ -1,12 +1,15 @@
 "use client";
-
+ 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-
+ 
 import { addEvent } from "@/data/eventsStorage";
 import { getAllSports } from "@/data/sportsStorage";
+import {
+  getScoringEngineForMethod as getScoringEngineFromConfig,
+} from "@/lib/scoring/configuration";
 import type { Sport } from "@/data/sportsStorage";
-
+ 
 import type {
   SportEvent,
   CompetitionCategory,
@@ -14,14 +17,14 @@ import type {
   ScoringMethod,
   ScoringEngine,
 } from "@/types/events";
-
+ 
 type SportOption = Sport;
-
+ 
 const inputClass =
   "mt-2 w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100";
-
+ 
 const labelClass = "block text-sm font-semibold text-slate-700";
-
+ 
 const scoringOptions: {
   value: ScoringMethod;
   label: string;
@@ -51,7 +54,7 @@ const scoringOptions: {
   { value: "match-play", label: "Match play", unit: "result", higherWins: true },
   { value: "digital-match", label: "Digital match", unit: "points", higherWins: true },
 ];
-
+ 
 const competitionCategories: {
   value: CompetitionCategory;
   label: string;
@@ -73,47 +76,7 @@ const competitionCategories: {
   { value: "esports", label: "Esports and Digital Competitions" },
   { value: "other", label: "Other Sports" },
 ];
-
-function getEngineForMethod(
-  method: ScoringMethod,
-  sportName: string
-): ScoringEngine {
-  const normalizedSport = sportName.trim().toLowerCase();
-
-  const methodEngine: Partial<Record<ScoringMethod, ScoringEngine>> = {
-    time: "time-race",
-    distance: "distance-height",
-    height: "distance-height",
-    points: "goal-points",
-    goals: "goal-points",
-    runs:
-      normalizedSport === "cricket"
-        ? "cricket"
-        : normalizedSport === "baseball" ||
-            normalizedSport === "softball"
-          ? "inning-runs"
-          : "custom",
-    sets: "rally-sets",
-    "win-draw-loss": "goal-points",
-    manual: "custom",
-    "rally-points": "rally-sets",
-    innings: "inning-runs",
-    cricket: "cricket",
-    "combat-points": "combat-points",
-    "judge-rounds": "judge-rounds",
-    "judged-performance": "judged-performance",
-    "target-shots": "target-precision",
-    "bowling-frames": "bowling",
-    "golf-strokes": "golf",
-    "strength-repetitions": "strength-performance",
-    "multi-event": "multi-event",
-    "match-play": "golf",
-    "digital-match": "digital-match",
-  };
-
-  return methodEngine[method] ?? "custom";
-}
-
+ 
 function getPositiveInteger(value: unknown, fallback: number): number {
   return typeof value === "number" &&
     Number.isInteger(value) &&
@@ -122,13 +85,22 @@ function getPositiveInteger(value: unknown, fallback: number): number {
     : fallback;
 }
 
+function getScoringEngineForMethod(
+  method: ScoringMethod,
+  sportName = ""
+): ScoringEngine {
+  return method === "target-shots" || /archery/i.test(sportName)
+    ? "target-precision"
+    : "goal-points";
+}
+ 
 export default function NewAdminEventPage() {
   const router = useRouter();
-
+ 
   const [availableSports, setAvailableSports] = useState<SportOption[]>([]);
   const [selectedSportId, setSelectedSportId] = useState("");
   const [sportsLoading, setSportsLoading] = useState(true);
-
+ 
   const [name, setName] = useState("");
   const [sport, setSport] = useState("");
   const [description, setDescription] = useState("");
@@ -137,17 +109,17 @@ export default function NewAdminEventPage() {
   const [minAge, setMinAge] = useState("");
   const [maxAge, setMaxAge] = useState("");
   const [registrationDeadline, setRegistrationDeadline] = useState("");
-
+ 
   const [registrationType, setRegistrationType] =
     useState<"team" | "individual">("individual");
   const [teamSize, setTeamSize] = useState("");
-
+ 
   const [category, setCategory] =
     useState<CompetitionCategory>("individual");
   const [genderCategory, setGenderCategory] =
     useState<GenderCategory>("open");
   const [ageGroup, setAgeGroup] = useState("");
-
+ 
   const [scoringMethod, setScoringMethod] =
     useState<ScoringMethod>("points");
   const [scoringUnit, setScoringUnit] = useState("points");
@@ -156,16 +128,16 @@ export default function NewAdminEventPage() {
     useState<ScoringEngine>("goal-points");
   const [scoringConfig, setScoringConfig] =
     useState<Record<string, unknown>>({});
-
+ 
   // Archery configuration
   const [roundsCount, setRoundsCount] = useState("1");
   const [arrowsPerRound, setArrowsPerRound] = useState("1");
-
+ 
   const [rules, setRules] = useState("");
   const [eligibility, setEligibility] = useState("");
-
+ 
   const isArchery = scoringEngine === "target-precision";
-
+ 
   useEffect(() => {
     try {
       const sports = getAllSports();
@@ -176,38 +148,38 @@ export default function NewAdminEventPage() {
       setSportsLoading(false);
     }
   }, []);
-
+ 
   const handleSportChange = (id: string) => {
     setSelectedSportId(id);
-
+ 
     const selectedSport = availableSports.find((item) => item.id === id);
-
+ 
     if (!selectedSport) {
       setSport("");
       return;
     }
-
+ 
     setSport(selectedSport.name);
     setRegistrationType(selectedSport.registrationType);
     setTeamSize("");
     setCategory(selectedSport.category);
-
+ 
     setScoringMethod(selectedSport.scoringMethod);
     setScoringUnit(selectedSport.scoringUnit);
     setHigherScoreWins(selectedSport.higherScoreWins);
-
+ 
     const engine =
       selectedSport.scoringEngine ??
-      getEngineForMethod(selectedSport.scoringMethod, selectedSport.name);
-
+      getScoringEngineFromConfig(selectedSport.scoringMethod, selectedSport.name);
+ 
     setScoringEngine(engine);
-
+ 
     const config = selectedSport.scoringConfig
       ? { ...selectedSport.scoringConfig }
       : {};
-
+ 
     setScoringConfig(config);
-
+ 
     setRoundsCount(
       String(getPositiveInteger(config.roundsCount, 1))
     );
@@ -215,40 +187,40 @@ export default function NewAdminEventPage() {
       String(getPositiveInteger(config.arrowsPerRound, 1))
     );
   };
-
+ 
   const handleScoringMethodChange = (value: ScoringMethod) => {
     setScoringMethod(value);
-
+ 
     const selected = scoringOptions.find(
       (option) => option.value === value
     );
-
+ 
     if (selected) {
       setScoringUnit(selected.unit);
       setHigherScoreWins(selected.higherWins);
     }
-
-    const engine = getEngineForMethod(value, sport);
+ 
+    const engine = getScoringEngineFromConfig(value, sport);
     setScoringEngine(engine);
-
+ 
     if (engine === "target-precision") {
       setHigherScoreWins(true);
     }
   };
-
+ 
   const submitEvent = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-
+ 
     if (!name.trim()) {
       alert("Please enter an event name.");
       return;
     }
-
+ 
     if (!selectedSportId || !sport.trim()) {
       alert("Please select a sport from the dropdown.");
       return;
     }
-
+ 
     if (
       !description.trim() ||
       !date ||
@@ -258,27 +230,27 @@ export default function NewAdminEventPage() {
       alert("Please fill in all required fields.");
       return;
     }
-
+ 
     if (registrationDeadline > date) {
       alert("Registration deadline cannot be after the event date.");
       return;
     }
-
+ 
     if (minAge && Number(minAge) < 0) {
       alert("Minimum age cannot be negative.");
       return;
     }
-
+ 
     if (maxAge && Number(maxAge) < 0) {
       alert("Maximum age cannot be negative.");
       return;
     }
-
+ 
     if (minAge && maxAge && Number(minAge) > Number(maxAge)) {
       alert("Minimum age cannot exceed maximum age.");
       return;
     }
-
+ 
     if (
       registrationType === "team" &&
       (!teamSize || Number(teamSize) < 2)
@@ -286,7 +258,7 @@ export default function NewAdminEventPage() {
       alert("Please enter a valid team size of at least 2.");
       return;
     }
-
+ 
     if (
       scoringMethod !== "manual" &&
       scoringMethod !== "win-draw-loss" &&
@@ -295,28 +267,28 @@ export default function NewAdminEventPage() {
       alert("Please enter the scoring unit.");
       return;
     }
-
+ 
     // Validate Archery configuration
     if (isArchery) {
       const rounds = Number(roundsCount);
       const arrows = Number(arrowsPerRound);
-
+ 
       if (!Number.isInteger(rounds) || rounds < 1 || rounds > 100) {
         alert("Archery rounds must be a whole number between 1 and 100.");
         return;
       }
-
+ 
       if (!Number.isInteger(arrows) || arrows < 1 || arrows > 100) {
         alert("Arrows per round must be a whole number between 1 and 100.");
         return;
       }
-
+ 
       if (registrationType !== "individual") {
         alert("Archery target scoring currently requires individual registration.");
         return;
       }
     }
-
+ 
     const finalScoringConfig = {
       ...scoringConfig,
       ...(isArchery
@@ -328,48 +300,48 @@ export default function NewAdminEventPage() {
           }
         : {}),
     };
-
+ 
     const newEvent: SportEvent = {
       id: `event-${Date.now()}`,
       name: name.trim(),
       sport: sport.trim(),
       sportId: selectedSportId,
-
+ 
       description: description.trim(),
       date,
       venue: venue.trim(),
-
+ 
       rules: rules
         .split("\n")
         .map((rule) => rule.trim())
         .filter(Boolean),
-
+ 
       eligibility: eligibility
         .split("\n")
         .map((item) => item.trim())
         .filter(Boolean),
-
+ 
       minAge: minAge ? Number(minAge) : undefined,
       maxAge: maxAge ? Number(maxAge) : undefined,
-
+ 
       registrationDeadline,
       registrationType,
-
+ 
       teamSize:
         registrationType === "team" ? Number(teamSize) : undefined,
-
+ 
       category,
       genderCategory,
       ageGroup: ageGroup.trim() || undefined,
-
+ 
       scoringMethod,
       scoringUnit: scoringUnit.trim(),
       higherScoreWins,
-
+ 
       scoringEngine,
       scoringConfig: finalScoringConfig,
     };
-
+ 
     try {
       addEvent(newEvent);
       alert("Event published successfully!");
@@ -379,23 +351,23 @@ export default function NewAdminEventPage() {
       alert("Could not publish the event. Please try again.");
     }
   };
-
+ 
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-8 text-slate-900 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-4xl">
         <p className="text-sm font-bold uppercase tracking-widest text-blue-600">
           iSports Admin
         </p>
-
+ 
         <h1 className="mt-3 text-3xl font-bold sm:text-4xl">
           Publish New Sports Event
         </h1>
-
+ 
         <p className="mt-3 text-slate-600">
           Select an admin-created sport, choose competition categories,
           and configure the scoring rules.
         </p>
-
+ 
         <form
           onSubmit={submitEvent}
           className="mt-8 space-y-8 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-8"
@@ -405,7 +377,7 @@ export default function NewAdminEventPage() {
             <h2 className="border-b border-slate-200 pb-3 text-xl font-bold">
               1. Event Information
             </h2>
-
+ 
             <div>
               <label className={labelClass}>Event Name *</label>
               <input
@@ -416,7 +388,7 @@ export default function NewAdminEventPage() {
                 className={inputClass}
               />
             </div>
-
+ 
             <div>
               <label className={labelClass}>Select Sport *</label>
               <select
@@ -433,7 +405,7 @@ export default function NewAdminEventPage() {
                       ? "No sports created yet"
                       : "Choose a sport"}
                 </option>
-
+ 
                 {availableSports.map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.icon ? `${item.icon} ` : ""}
@@ -441,7 +413,7 @@ export default function NewAdminEventPage() {
                   </option>
                 ))}
               </select>
-
+ 
               {availableSports.length === 0 && !sportsLoading && (
                 <p className="mt-2 text-sm text-amber-700">
                   No sports found. Open Admin → Sports Management and
@@ -449,7 +421,7 @@ export default function NewAdminEventPage() {
                 </p>
               )}
             </div>
-
+ 
             <div>
               <label className={labelClass}>Description *</label>
               <textarea
@@ -461,7 +433,7 @@ export default function NewAdminEventPage() {
                 className={inputClass}
               />
             </div>
-
+ 
             <div className="grid gap-5 sm:grid-cols-2">
               <div>
                 <label className={labelClass}>Event Date *</label>
@@ -473,7 +445,7 @@ export default function NewAdminEventPage() {
                   className={inputClass}
                 />
               </div>
-
+ 
               <div>
                 <label className={labelClass}>Registration Deadline *</label>
                 <input
@@ -485,7 +457,7 @@ export default function NewAdminEventPage() {
                 />
               </div>
             </div>
-
+ 
             <div>
               <label className={labelClass}>Venue *</label>
               <input
@@ -497,13 +469,13 @@ export default function NewAdminEventPage() {
               />
             </div>
           </section>
-
+ 
           {/* 2. COMPETITION CATEGORIES */}
           <section className="space-y-5">
             <h2 className="border-b border-slate-200 pb-3 text-xl font-bold">
               2. Competition Categories
             </h2>
-
+ 
             <div>
               <label className={labelClass}>Competition Category *</label>
               <select
@@ -520,7 +492,7 @@ export default function NewAdminEventPage() {
                 ))}
               </select>
             </div>
-
+ 
             <div>
               <label className={labelClass}>Gender Category *</label>
               <select
@@ -536,7 +508,7 @@ export default function NewAdminEventPage() {
                 <option value="mixed">Mixed</option>
               </select>
             </div>
-
+ 
             <div>
               <label className={labelClass}>Age Group (Optional)</label>
               <input
@@ -546,7 +518,7 @@ export default function NewAdminEventPage() {
                 className={inputClass}
               />
             </div>
-
+ 
             <div className="grid gap-5 sm:grid-cols-2">
               <div>
                 <label className={labelClass}>Minimum Age</label>
@@ -559,7 +531,7 @@ export default function NewAdminEventPage() {
                   className={inputClass}
                 />
               </div>
-
+ 
               <div>
                 <label className={labelClass}>Maximum Age</label>
                 <input
@@ -573,13 +545,13 @@ export default function NewAdminEventPage() {
               </div>
             </div>
           </section>
-
+ 
           {/* 3. REGISTRATION */}
           <section className="space-y-5">
             <h2 className="border-b border-slate-200 pb-3 text-xl font-bold">
               3. Registration
             </h2>
-
+ 
             <div>
               <label className={labelClass}>Registration Type *</label>
               <select
@@ -596,7 +568,7 @@ export default function NewAdminEventPage() {
                 <option value="team">Team Registration</option>
               </select>
             </div>
-
+ 
             {registrationType === "team" && (
               <div>
                 <label className={labelClass}>Team Size *</label>
@@ -612,13 +584,13 @@ export default function NewAdminEventPage() {
               </div>
             )}
           </section>
-
+ 
           {/* 4. SCORING */}
           <section className="space-y-5">
             <h2 className="border-b border-slate-200 pb-3 text-xl font-bold">
               4. Scoring Configuration
             </h2>
-
+ 
             <div>
               <label className={labelClass}>Scoring Method *</label>
               <select
@@ -635,7 +607,7 @@ export default function NewAdminEventPage() {
                 ))}
               </select>
             </div>
-
+ 
             {scoringMethod !== "win-draw-loss" &&
               scoringMethod !== "manual" && (
                 <div>
@@ -649,7 +621,7 @@ export default function NewAdminEventPage() {
                   />
                 </div>
               )}
-
+ 
             {scoringMethod === "manual" && (
               <div>
                 <label className={labelClass}>Result Description</label>
@@ -661,7 +633,7 @@ export default function NewAdminEventPage() {
                 />
               </div>
             )}
-
+ 
             {scoringMethod !== "win-draw-loss" && (
               <div>
                 <label className={labelClass}>Winning Rule *</label>
@@ -675,14 +647,14 @@ export default function NewAdminEventPage() {
                   <option value="higher">Higher result wins</option>
                   <option value="lower">Lower result wins</option>
                 </select>
-
+ 
                 <p className="mt-2 text-xs text-slate-500">
                   Example: the lowest time wins a race, while the longest
                   distance wins a long jump.
                 </p>
               </div>
             )}
-
+ 
             {/* ARCHERY SETTINGS */}
             {isArchery && (
               <div className="space-y-5 rounded-xl border border-amber-200 bg-amber-50 p-5">
@@ -695,7 +667,7 @@ export default function NewAdminEventPage() {
                     individual athlete.
                   </p>
                 </div>
-
+ 
                 <div className="grid gap-5 sm:grid-cols-2">
                   <div>
                     <label className={labelClass}>Number of Rounds *</label>
@@ -710,7 +682,7 @@ export default function NewAdminEventPage() {
                       className={inputClass}
                     />
                   </div>
-
+ 
                   <div>
                     <label className={labelClass}>
                       Arrows Per Round *
@@ -727,7 +699,7 @@ export default function NewAdminEventPage() {
                     />
                   </div>
                 </div>
-
+ 
                 <div className="rounded-lg border border-amber-200 bg-white p-4 text-sm text-slate-700">
                   <p>
                     <strong>Minimum arrow score:</strong> 0
@@ -746,7 +718,7 @@ export default function NewAdminEventPage() {
                       : 0}
                   </p>
                 </div>
-
+ 
                 <p className="text-xs text-amber-800">
                   Archery target scoring currently uses individual
                   registration. Team-based Archery scoring is not enabled
@@ -754,10 +726,10 @@ export default function NewAdminEventPage() {
                 </p>
               </div>
             )}
-
+ 
             <div className="rounded-lg border border-blue-100 bg-blue-50 p-4 text-sm text-blue-900">
               <p className="font-semibold">Scoring Preview</p>
-
+ 
               <p className="mt-1">
                 {isArchery
                   ? "Each athlete receives an individual arrow-by-arrow score. The system will calculate round totals and the overall result."
@@ -777,19 +749,19 @@ export default function NewAdminEventPage() {
                                 higherScoreWins ? "higher" : "lower"
                               } results should rank first.`}
               </p>
-
+ 
               <p className="mt-2">
                 <strong>Selected scoring engine:</strong> {scoringEngine}
               </p>
             </div>
           </section>
-
+ 
           {/* 5. RULES AND ELIGIBILITY */}
           <section className="space-y-5">
             <h2 className="border-b border-slate-200 pb-3 text-xl font-bold">
               5. Rules and Eligibility
             </h2>
-
+ 
             <div>
               <label className={labelClass}>Rules</label>
               <textarea
@@ -800,7 +772,7 @@ export default function NewAdminEventPage() {
                 className={inputClass}
               />
             </div>
-
+ 
             <div>
               <label className={labelClass}>
                 Eligibility Requirements
@@ -814,7 +786,7 @@ export default function NewAdminEventPage() {
               />
             </div>
           </section>
-
+ 
           {/* ACTIONS */}
           <div className="flex flex-col gap-3 border-t border-slate-200 pt-6 sm:flex-row">
             <button
@@ -824,7 +796,7 @@ export default function NewAdminEventPage() {
             >
               Publish Event
             </button>
-
+ 
             <button
               type="button"
               onClick={() => router.push("/admin")}
@@ -838,3 +810,4 @@ export default function NewAdminEventPage() {
     </main>
   );
 }
+ 

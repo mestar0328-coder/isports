@@ -1,13 +1,10 @@
-export type ScoreAuditAction =
-  | "Score Saved"
-  | "Score Submitted"
-  | "Score Corrected"
-  | "Score Locked";
+export type ScoreAuditAction = "Score Saved" | "Score Submitted" | "Score Corrected" | "Score Locked";
 
 export type ScoreAuditDetails = {
   eventId?: string;
   scoreRecordId?: string;
   athleteId?: string;
+  actorId?: string;
   scoringEngine?: string;
   status?: string;
   scoreData?: unknown;
@@ -18,14 +15,15 @@ export type ScoreAuditDetails = {
 
 export type ScoreAudit = {
   id: string;
+  // Event-only score references use `event:<eventId>`; existing match IDs are unchanged.
   matchId: string;
   action: ScoreAuditAction;
   performedBy: string;
   timestamp: string;
-  // Optional fields keep older localStorage records compatible.
   eventId?: string;
   scoreRecordId?: string;
   athleteId?: string;
+  actorId?: string;
   scoringEngine?: string;
   status?: string;
   scoreData?: unknown;
@@ -35,79 +33,53 @@ export type ScoreAudit = {
 };
 
 const STORAGE_KEY = "isports_score_audit";
-
 function createId(): string {
-  if (
-    typeof crypto !== "undefined" &&
-    typeof crypto.randomUUID === "function"
-  ) {
-    return crypto.randomUUID();
-  }
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 export function getScoreAudit(): ScoreAudit[] {
   if (typeof window === "undefined") return [];
-
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-
-    return parsed.filter(
-      (item): item is ScoreAudit =>
-        item !== null &&
-        typeof item === "object" &&
-        typeof (item as ScoreAudit).id === "string" &&
-        typeof (item as ScoreAudit).matchId === "string" &&
-        typeof (item as ScoreAudit).action === "string" &&
-        typeof (item as ScoreAudit).performedBy === "string" &&
-        typeof (item as ScoreAudit).timestamp === "string"
+    const raw: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((x): x is ScoreAudit =>
+      !!x && typeof x === "object" &&
+      typeof (x as ScoreAudit).id === "string" &&
+      typeof (x as ScoreAudit).matchId === "string" &&
+      typeof (x as ScoreAudit).action === "string" &&
+      typeof (x as ScoreAudit).performedBy === "string" &&
+      typeof (x as ScoreAudit).timestamp === "string"
     );
-  } catch (error) {
-    console.error("Unable to read score audit:", error);
+  } catch (e) {
+    console.error("Unable to read score audit:", e);
     return [];
   }
 }
 
-function saveScoreAudit(entries: ScoreAudit[]): void {
+function save(entries: ScoreAudit[]): void {
   if (typeof window === "undefined") return;
-
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
-  } catch (error) {
-    console.error("Unable to save score audit:", error);
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(entries)); }
+  catch (e) {
+    console.error("Unable to save score audit:", e);
     throw new Error("Unable to save the score audit record.");
   }
 }
 
 export function addScoreAudit(
-  matchId: string,
-  action: ScoreAuditAction,
-  performedBy: string,
-  details: ScoreAuditDetails = {}
+  matchId: string, action: ScoreAuditAction, performedBy: string, details: ScoreAuditDetails = {}
 ): ScoreAudit[] {
-  if (!matchId.trim() || !performedBy.trim()) {
-    throw new Error("Match ID and actor name are required.");
-  }
-
+  if (!matchId.trim() || !performedBy.trim()) throw new Error("Audit reference and actor name are required.");
   const entry: ScoreAudit = {
-    id: createId(),
-    matchId,
-    action,
-    performedBy,
-    timestamp: new Date().toISOString(),
-    ...details,
+    id: createId(), matchId, action, performedBy,
+    timestamp: new Date().toISOString(), ...details,
   };
-
   const updated = [entry, ...getScoreAudit()];
-  saveScoreAudit(updated);
+  save(updated);
   return updated;
 }
 
 export function clearScoreAudit(): void {
-  if (typeof window === "undefined") return;
-  localStorage.removeItem(STORAGE_KEY);
+  if (typeof window !== "undefined") localStorage.removeItem(STORAGE_KEY);
 }

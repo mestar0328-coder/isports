@@ -1,8 +1,9 @@
 "use client";
-
+ 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-
+import { getScoringEngineForMethod, getSportScoringProfile } from "@/lib/scoring/configuration";
+ 
 import {
 addCustomSport,
 deleteCustomSport,
@@ -13,7 +14,7 @@ type SportCategory,
 type SportScoringEngine,
 type SportScoringMethod,
 } from "@/data/sportsStorage";
-
+ 
 const CATEGORIES: { value: SportCategory; label: string }[] = [
 { value: "athletics", label: "Athletics" },
 { value: "individual", label: "Individual Sports" },
@@ -32,7 +33,7 @@ const CATEGORIES: { value: SportCategory; label: string }[] = [
 { value: "esports", label: "Esports and Digital Competitions" },
 { value: "other", label: "Other Sports" },
 ];
-
+ 
 const SCORING_METHODS: {
 value: SportScoringMethod;
 label: string;
@@ -62,7 +63,7 @@ higherWins: boolean;
 { value: "match-play", label: "Match play — holes or games won", unit: "holes", higherWins: true },
 { value: "digital-match", label: "Digital match results", unit: "points", higherWins: true },
 ];
-
+ 
 const SCORING_ENGINES: {
 value: SportScoringEngine;
 label: string;
@@ -84,32 +85,32 @@ label: string;
 { value: "digital-match", label: "Digital Match Engine" },
 { value: "custom", label: "Custom Scoring Engine" },
 ];
-
+ 
 const METHOD_ENGINE: Record<SportScoringMethod, SportScoringEngine> = {
-time: "time-race",
-distance: "distance-height",
-height: "distance-height",
-points: "goal-points",
-goals: "goal-points",
-runs: "inning-runs",
-sets: "rally-sets",
-"win-draw-loss": "goal-points",
-manual: "custom",
-"rally-points": "rally-sets",
-innings: "inning-runs",
-cricket: "cricket",
-"combat-points": "combat-points",
-"judge-rounds": "judge-rounds",
-"judged-performance": "judged-performance",
-"target-shots": "target-precision",
-"bowling-frames": "bowling",
-"golf-strokes": "golf",
-"strength-repetitions": "strength-performance",
-"multi-event": "multi-event",
-"match-play": "golf",
-"digital-match": "digital-match",
+  "time": getScoringEngineForMethod("time"),
+  "distance": getScoringEngineForMethod("distance"),
+  "height": getScoringEngineForMethod("height"),
+  "points": getScoringEngineForMethod("points"),
+  "goals": getScoringEngineForMethod("goals"),
+  "runs": getScoringEngineForMethod("runs"),
+  "sets": getScoringEngineForMethod("sets"),
+  "win-draw-loss": getScoringEngineForMethod("win-draw-loss"),
+  "manual": getScoringEngineForMethod("manual"),
+  "rally-points": getScoringEngineForMethod("rally-points"),
+  "innings": getScoringEngineForMethod("innings"),
+  "cricket": getScoringEngineForMethod("cricket"),
+  "combat-points": getScoringEngineForMethod("combat-points"),
+  "judge-rounds": getScoringEngineForMethod("judge-rounds"),
+  "judged-performance": getScoringEngineForMethod("judged-performance"),
+  "target-shots": getScoringEngineForMethod("target-shots"),
+  "bowling-frames": getScoringEngineForMethod("bowling-frames"),
+  "golf-strokes": getScoringEngineForMethod("golf-strokes"),
+  "strength-repetitions": getScoringEngineForMethod("strength-repetitions"),
+  "multi-event": getScoringEngineForMethod("multi-event"),
+  "match-play": getScoringEngineForMethod("match-play"),
+  "digital-match": getScoringEngineForMethod("digital-match"),
 };
-
+ 
 function createEmptySport(): Sport {
 return {
 id: "",
@@ -125,7 +126,7 @@ higherScoreWins: true,
 scoringConfig: {},
 };
 }
-
+ 
 function createSportId(name: string): string {
 return name
 .trim()
@@ -133,21 +134,21 @@ return name
 .replace(/[^a-z0-9]+/g, "-")
 .replace(/^-+|-+$/g, "");
 }
-
+ 
 export default function AdminSportsPage() {
 const router = useRouter();
-
+ 
 const [allSports, setAllSports] = useState<Sport[]>([]);
 const [form, setForm] = useState<Sport>(createEmptySport());
 const [editingId, setEditingId] = useState<string | null>(null);
 const [message, setMessage] = useState("");
 const [error, setError] = useState("");
 const [search, setSearch] = useState("");
-
+ 
 useEffect(() => {
 setAllSports(getAllSports());
 }, []);
-
+ 
 function updateField<K extends keyof Sport>(
 key: K,
 value: Sport[K]
@@ -156,24 +157,33 @@ setForm(function (current) {
 return { ...current, [key]: value };
 });
 }
-
+ 
+function handleSportNameChange(name: string) {
+setForm(function (current) {
+  const profile = getSportScoringProfile(name);
+  return profile
+    ? { ...current, name, ...profile }
+    : { ...current, name };
+});
+}
+ 
 function handleScoringMethodChange(method: SportScoringMethod) {
 const selected = SCORING_METHODS.find(function (item) {
 return item.value === method;
 });
-
+ 
 setForm(function (current) {
   return {
     ...current,
     scoringMethod: method,
-    scoringEngine: METHOD_ENGINE[method],
+    scoringEngine: getScoringEngineForMethod(method, current.name),
     scoringUnit: selected ? selected.unit : "points",
     higherScoreWins: selected ? selected.higherWins : true,
   };
 });
-
+ 
 }
-
+ 
 function handleGenderChange(
 gender: Sport["genderCategories"][number],
 checked: boolean
@@ -184,68 +194,68 @@ const genders = checked
 : current.genderCategories.filter(function (item) {
 return item !== gender;
 });
-
+ 
   return { ...current, genderCategories: genders };
 });
-
+ 
 }
-
+ 
 function resetForm() {
 setForm(createEmptySport());
 setEditingId(null);
 setMessage("");
 setError("");
 }
-
+ 
 function handleSubmit() {
 setMessage("");
 setError("");
-
+ 
 const name = form.name.trim();
 const icon = form.icon.trim();
 const unit = form.scoringUnit.trim();
-
+ 
 if (!name) {
   setError("Please enter a sport name.");
   return;
 }
-
+ 
 if (!icon) {
   setError("Please enter a sport icon.");
   return;
 }
-
+ 
 if (form.genderCategories.length === 0) {
   setError("Select at least one gender category.");
   return;
 }
-
+ 
 if (!unit) {
   setError("Please enter a scoring unit.");
   return;
 }
-
+ 
 const id = editingId || createSportId(name);
-
+ 
 if (!id) {
   setError("Use a sport name containing English letters or numbers.");
   return;
 }
-
+ 
 const duplicate = allSports.some(function (sport) {
   if (sport.id === editingId) return false;
-
+ 
   return (
     sport.id === id ||
     sport.name.trim().toLowerCase() === name.toLowerCase()
   );
 });
-
+ 
 if (duplicate) {
   setError("A sport with this name already exists.");
   return;
 }
-
+ 
 const savedSport: Sport = {
   ...form,
   id,
@@ -255,28 +265,28 @@ const savedSport: Sport = {
   genderCategories: [...form.genderCategories],
   scoringConfig: form.scoringConfig || {},
 };
-
+ 
 try {
   if (editingId) {
     updateCustomSport(savedSport);
-
+ 
     setAllSports(function (current) {
       return current.map(function (sport) {
         return sport.id === editingId ? savedSport : sport;
       });
     });
-
+ 
     setMessage(name + " updated successfully.");
   } else {
     addCustomSport(savedSport);
-
+ 
     setAllSports(function (current) {
       return [...current, savedSport];
     });
-
+ 
     setMessage(name + " created successfully.");
   }
-
+ 
   setForm(createEmptySport());
   setEditingId(null);
 } catch (err) {
@@ -284,9 +294,9 @@ try {
     err instanceof Error ? err.message : "Could not save the sport."
   );
 }
-
+ 
 }
-
+ 
 function handleEdit(sport: Sport) {
 setForm({
 ...sport,
@@ -294,63 +304,63 @@ scoringEngine:
 sport.scoringEngine || METHOD_ENGINE[sport.scoringMethod],
 scoringConfig: sport.scoringConfig || {},
 });
-
+ 
 setEditingId(sport.id);
 setMessage("");
 setError("");
-
+ 
 window.scrollTo({ top: 0, behavior: "smooth" });
-
+ 
 }
-
+ 
 function handleDelete(sport: Sport) {
 const confirmed = window.confirm(
 "Delete " +
 sport.name +
 " from the sports list? Existing events and historical scores may still reference this sport."
 );
-
+ 
 if (!confirmed) {
   return;
 }
-
+ 
 try {
   deleteCustomSport(sport.id);
-
+ 
   setAllSports(function (current) {
     return current.filter(function (item) {
       return item.id !== sport.id;
     });
   });
-
+ 
   if (editingId === sport.id) {
     resetForm();
   }
-
+ 
   setMessage(sport.name + " deleted.");
   setError("");
 } catch {
   setError("Could not delete this sport.");
 }
-
+ 
 }
-
+ 
 const filteredSports = allSports.filter(function (sport) {
 const query = search.toLowerCase();
-
+ 
 return (
   sport.name.toLowerCase().includes(query) ||
   sport.category.toLowerCase().includes(query) ||
   sport.scoringMethod.toLowerCase().includes(query)
 );
-
+ 
 });
-
+ 
 const fieldClass =
 "mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100";
-
+ 
 const labelClass = "block text-sm font-semibold text-slate-700";
-
+ 
 return (
 <main className="min-h-screen bg-slate-50 px-4 py-8 text-slate-900 sm:px-6 lg:px-8">
 <div className="mx-auto max-w-6xl">
@@ -358,15 +368,15 @@ return (
 <p className="text-sm font-bold uppercase tracking-widest text-blue-600">
 iSports Admin
 </p>
-
+ 
       <h1 className="mt-3 text-3xl font-extrabold sm:text-4xl">
         Sports Management
       </h1>
-
+ 
       <p className="mt-3 text-slate-600">
         Configure sports, categories, scoring methods, and scoring engines.
       </p>
-
+ 
       <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
           { label: "Sports", value: allSports.length },
@@ -390,7 +400,7 @@ iSports Admin
         })}
       </div>
     </header>
-
+ 
     <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
@@ -401,7 +411,7 @@ iSports Admin
             Select a category, scoring method, and engine.
           </p>
         </div>
-
+ 
         {editingId && (
           <button
             type="button"
@@ -412,20 +422,20 @@ iSports Admin
           </button>
         )}
       </div>
-
+ 
       <div className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
         <div>
           <label className={labelClass}>Sport Name *</label>
           <input
             value={form.name}
             onChange={function (e) {
-              updateField("name", e.target.value);
+              handleSportNameChange(e.target.value);
             }}
             placeholder="Cricket, Football, Archery..."
             className={fieldClass}
           />
         </div>
-
+ 
         <div>
           <label className={labelClass}>Sport Icon *</label>
           <input
@@ -437,7 +447,7 @@ iSports Admin
             className={fieldClass}
           />
         </div>
-
+ 
         <div>
           <label className={labelClass}>Sport Category *</label>
           <select
@@ -456,7 +466,7 @@ iSports Admin
             })}
           </select>
         </div>
-
+ 
         <div>
           <label className={labelClass}>Registration Type *</label>
           <select
@@ -473,7 +483,7 @@ iSports Admin
             <option value="team">Team</option>
           </select>
         </div>
-
+ 
         <div>
           <label className={labelClass}>Scoring Method *</label>
           <select
@@ -494,7 +504,7 @@ iSports Admin
             })}
           </select>
         </div>
-
+ 
         <div>
           <label className={labelClass}>Scoring Engine *</label>
           <select
@@ -518,7 +528,7 @@ iSports Admin
             })}
           </select>
         </div>
-
+ 
         <div>
           <label className={labelClass}>Scoring Unit *</label>
           <input
@@ -530,7 +540,7 @@ iSports Admin
             className={fieldClass}
           />
         </div>
-
+ 
         <div>
           <label className={labelClass}>Winning Rule *</label>
           <select
@@ -544,10 +554,10 @@ iSports Admin
             <option value="lower">Lower score wins</option>
           </select>
         </div>
-
+ 
         <fieldset className="sm:col-span-2 lg:col-span-3">
           <legend className={labelClass}>Gender Categories *</legend>
-
+ 
           <div className="mt-3 flex flex-wrap gap-4">
             {(["men", "women", "mixed", "open"] as const).map(
               function (gender) {
@@ -572,7 +582,7 @@ iSports Admin
           </div>
         </fieldset>
       </div>
-
+ 
       <div className="mt-6 rounded-xl border border-blue-100 bg-blue-50 p-4">
         <h3 className="font-bold text-blue-900">
           Scoring Engine Configuration
@@ -594,7 +604,7 @@ iSports Admin
           separately.
         </p>
       </div>
-
+ 
       {error && (
         <p
           role="alert"
@@ -603,7 +613,7 @@ iSports Admin
           {error}
         </p>
       )}
-
+ 
       {message && (
         <p
           role="status"
@@ -612,7 +622,7 @@ iSports Admin
           {message}
         </p>
       )}
-
+ 
       <div className="mt-6 flex flex-wrap gap-3">
         <button
           type="button"
@@ -621,7 +631,7 @@ iSports Admin
         >
           {editingId ? "Save Changes" : "+ Create Sport"}
         </button>
-
+ 
         <button
           type="button"
           onClick={function () {
@@ -633,7 +643,7 @@ iSports Admin
         </button>
       </div>
     </section>
-
+ 
     <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
@@ -645,7 +655,7 @@ iSports Admin
             {allSports.length === 1 ? "Sport" : "Sports"}
           </h2>
         </div>
-
+ 
         <div className="w-full sm:max-w-xs">
           <label className={labelClass}>Search Sports</label>
           <input
@@ -658,7 +668,7 @@ iSports Admin
           />
         </div>
       </div>
-
+ 
       {filteredSports.length === 0 ? (
         <div className="mt-6 rounded-xl border border-dashed border-slate-300 p-10 text-center">
           <p className="text-4xl">🏟️</p>
@@ -679,7 +689,7 @@ iSports Admin
             const method = SCORING_METHODS.find(function (item) {
               return item.value === sport.scoringMethod;
             });
-
+ 
             const engine = SCORING_ENGINES.find(function (item) {
               return (
                 item.value ===
@@ -687,11 +697,11 @@ iSports Admin
                   METHOD_ENGINE[sport.scoringMethod])
               );
             });
-
+ 
             const category = CATEGORIES.find(function (item) {
               return item.value === sport.category;
             });
-
+ 
             return (
               <article
                 key={sport.id}
@@ -706,7 +716,7 @@ iSports Admin
                     </p>
                   </div>
                 </div>
-
+ 
                 <div className="mt-4 space-y-2 text-sm text-slate-600">
                   <p>
                     <strong>Category:</strong>{" "}
@@ -738,7 +748,7 @@ iSports Admin
                     {sport.higherScoreWins ? "Higher" : "Lower"} result
                   </p>
                 </div>
-
+ 
                 <div className="mt-5 flex gap-2">
                   <button
                     type="button"
@@ -749,7 +759,7 @@ iSports Admin
                   >
                     Edit
                   </button>
-
+ 
                   <button
                     type="button"
                     onClick={function () {
@@ -768,6 +778,7 @@ iSports Admin
     </section>
   </div>
 </main>
-
+ 
 );
 }
+ 
