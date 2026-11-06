@@ -1,71 +1,63 @@
-import type { ScoringEngine, SportEvent } from "@/types/events";
+import type {
+  ScoringEngine,
+  SportEvent,
+} from "@/types/events";
+
 import {
-findScoringEngineForSport,
-getScoringEngineById,
+  findScoringEngineForSport,
+  getScoringEngineById,
 } from "@/lib/scoring/registry";
 
+import {
+  getScoringEngineForMethod,
+} from "@/lib/scoring/configuration";
+
+// --------------------------------------------------
+// CENTRALIZED ENGINE RESOLUTION
+// --------------------------------------------------
+
 export function resolveScoringEngine(
-event: SportEvent
+  event: Pick<
+    SportEvent,
+    "sport" | "scoringEngine" | "scoringMethod"
+  >
 ): ScoringEngine {
-// 1. Use the engine explicitly selected for this event.
-if (event.scoringEngine) {
-const registeredEngine = getScoringEngineById(
-event.scoringEngine
-);
+  const sportName = event.sport?.trim() ?? "";
 
-if (registeredEngine) {
-  return registeredEngine.id;
-}
+  // 1. Respect an explicitly configured supported engine.
+  if (event.scoringEngine) {
+    const registeredEngine = getScoringEngineById(
+      event.scoringEngine
+    );
 
-return "custom";
+    if (registeredEngine) {
+      return registeredEngine.id;
+    }
+  }
 
-}
+  // 2. Resolve using the centralized scoring configuration.
+  if (event.scoringMethod) {
+    const configuredEngine = getScoringEngineForMethod(
+      event.scoringMethod,
+      sportName
+    );
 
-// 2. Use the event's configured scoring method when possible.
-if (event.scoringMethod) {
-const methodToEngine: Partial<
-Record<NonNullable<SportEvent["scoringMethod"]>, ScoringEngine>
-> = {
-time: "time-race",
-distance: "distance-height",
-height: "distance-height",
-points: "goal-points",
-goals: "goal-points",
-runs: event.sport.trim().toLowerCase() === "cricket"
-? "cricket"
-: "inning-runs",
-sets: "rally-sets",
-"win-draw-loss": "goal-points",
-"rally-points": "rally-sets",
-innings: "inning-runs",
-cricket: "cricket",
-"combat-points": "combat-points",
-"judge-rounds": "judge-rounds",
-"judged-performance": "judged-performance",
-"target-shots": "target-precision",
-"bowling-frames": "bowling",
-"golf-strokes": "golf",
-"strength-repetitions": "strength-performance",
-"multi-event": "multi-event",
-"match-play": "golf",
-"digital-match": "digital-match",
-};
+    const registeredEngine = getScoringEngineById(
+      configuredEngine
+    );
 
-const resolvedMethod = methodToEngine[event.scoringMethod];
+    if (registeredEngine) {
+      return registeredEngine.id;
+    }
+  }
 
-if (resolvedMethod) {
-  return resolvedMethod;
-}
+  // 3. Resolve from the registered sport configuration.
+  const sportEngine = findScoringEngineForSport(sportName);
 
-}
+  if (sportEngine) {
+    return sportEngine.id;
+  }
 
-// 3. Fall back to the registry's sport mapping.
-const matchingEngine = findScoringEngineForSport(event.sport);
-
-if (matchingEngine) {
-return matchingEngine.id;
-}
-
-// 4. Unknown or newly created sports use configurable scoring.
-return "custom";
+  // 4. Safe fallback for unsupported or unconfigured sports.
+  return "custom";
 }

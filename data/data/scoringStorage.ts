@@ -1,24 +1,40 @@
 import type { SportEvent } from "@/types/events";
 import type {
-  EventScoreRecord,
-  ScoreAuditEntry,
-  ScoreStatus,
-  SportScoreData,
+EventScoreRecord,
+ScoreAuditEntry,
+ScoreStatus,
+SportScoreData,
 } from "@/types/scoring";
 
 import {
-  canScoreEvent,
-  getCurrentInchargeAccess,
+canScoreEvent,
+getCurrentInchargeAccess,
 } from "../inchargeAuth";
 
-import { addScoreAudit } from "../scoreAudit";
+import {
+addScoreAuditWithId,
+type ScoreAuditAction,
+type ScoreAuditDetails,
+} from "../scoreAudit";
+
 import { prepareEventScore } from "../../lib/scoring/prepareEventScore";
+import { validateScore } from "../../lib/validateScore";
 
 const STORAGE_KEY = "isports_event_scores";
+const RECOVERY_KEY = "isports_score_recovery";
 
 type ExtendedScore = EventScoreRecord & {
-  athleteId?: string;
-  matchId?: string;
+athleteId?: string;
+matchId?: string;
+};
+
+type PendingScoreOperation = {
+auditId: string;
+scores: EventScoreRecord[];
+matchId: string;
+action: ScoreAuditAction;
+performedBy: string;
+details: ScoreAuditDetails;
 };
 
 export const SCORE_CORRECTION_WINDOW_MS = 45 * 60 * 1000;
@@ -28,119 +44,260 @@ export const SCORE_CORRECTION_WINDOW_MS = 45 * 60 * 1000;
 // --------------------------------------------------
 
 function id(): string {
-  return typeof crypto !== "undefined" &&
-    typeof crypto.randomUUID === "function"
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+return typeof crypto !== "undefined" &&
+typeof crypto.randomUUID === "function"
+? crypto.randomUUID()
+: `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 const athleteId = (s: EventScoreRecord) =>
-  (s as ExtendedScore).athleteId;
+(s as ExtendedScore).athleteId;
 
 const matchId = (s: EventScoreRecord) =>
-  (s as ExtendedScore).matchId;
+(s as ExtendedScore).matchId;
 
 // --------------------------------------------------
 // SCORE STORAGE
 // --------------------------------------------------
 
 function read(): EventScoreRecord[] {
-  if (typeof window === "undefined") return [];
+if (typeof window === "undefined") return [];
 
-  try {
-    const value: unknown = JSON.parse(
-      localStorage.getItem(STORAGE_KEY) || "[]"
-    );
+try {
+const value: unknown = JSON.parse(
+localStorage.getItem(STORAGE_KEY) || "[]"
+);
 
-    return Array.isArray(value)
-      ? (value as EventScoreRecord[])
-      : [];
-  } catch (error) {
-    console.error("Unable to read scores:", error);
-    return [];
-  }
+return Array.isArray(value)
+  ? (value as EventScoreRecord[])
+  : [];
+
+} catch (error) {
+console.error("Unable to read scores:", error);
+throw new Error(
+"Unable to read saved scores. Please check browser storage before continuing."
+);
+}
 }
 
 function write(scores: EventScoreRecord[]): void {
-  if (typeof window === "undefined") {
-    throw new Error("Scores can only be saved in the browser.");
-  }
+if (typeof window === "undefined") {
+throw new Error("Scores can only be saved in the browser.");
+}
 
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(scores));
-  } catch (error) {
-    console.error("Unable to save scores:", error);
-    throw new Error("Unable to save scores in browser storage.");
-  }
+try {
+localStorage.setItem(STORAGE_KEY, JSON.stringify(scores));
+} catch (error) {
+console.error("Unable to save scores:", error);
+throw new Error("Unable to save scores in browser storage.");
+}
+}
+
+// --------------------------------------------------
+// RECOVERY JOURNAL
+// --------------------------------------------------
+
+function readPendingOperation(): PendingScoreOperation | null {
+if (typeof window === "undefined") return null;
+
+let raw: string | null;
+
+try {
+raw = localStorage.getItem(RECOVERY_KEY);
+} catch (error) {
+console.error("Unable to access score recovery journal:", error);
+throw new Error("Unable to access the score recovery journal.");
+}
+
+if (!raw) return null;
+
+try {
+const value: unknown = JSON.parse(raw);
+
+if (
+  !value ||
+  typeof value !== "object" ||
+  !("auditId" in value) ||
+  typeof value.auditId !== "string" ||
+  !("scores" in value) ||
+  !Array.isArray(value.scores) ||
+  !("matchId" in value) ||
+  typeof value.matchId !== "string" ||
+  !("action" in value) ||
+  typeof value.action !== "string" ||
+  !("performedBy" in value) ||
+  typeof value.performedBy !== "string" ||
+  !("details" in value) ||
+  !value.details ||
+  typeof value.details !== "object"
+) {
+  throw new Error("Invalid recovery journal structure.");
+}
+
+return value as PendingScoreOperation;
+
+} catch (error) {
+console.error("Invalid score recovery journal:", error);
+throw new Error(
+"A pending score recovery record is damaged. Scoring is paused to protect score and audit data."
+);
+}
+}
+
+function savePendingOperation(
+operation: PendingScoreOperation
+): void {
+if (typeof window === "undefined") {
+throw new Error("Score recovery is only available in the browser.");
+}
+
+try {
+localStorage.setItem(
+RECOVERY_KEY,
+JSON.stringify(operation)
+);
+} catch (error) {
+console.error("Unable to save score recovery journal:", error);
+throw new Error(
+"Unable to prepare score recovery. No score update was attempted."
+);
+}
+}
+
+function clearPendingOperation(): void {
+if (typeof window === "undefined") return;
+
+try {
+localStorage.removeItem(RECOVERY_KEY);
+} catch (error) {
+console.error("Unable to clear score recovery journal:", error);
+throw new Error(
+"The score operation was saved, but its recovery journal could not be cleared."
+);
+}
+}
+
+/**
+
+* Replays an interrupted operation.
+* 
+* The stable audit ID prevents duplicate central audit entries
+* if recovery runs more than once.
+  */
+  function recoverPendingOperation(): void {
+  const pending = readPendingOperation();
+
+if (!pending) return;
+
+write(pending.scores);
+
+addScoreAuditWithId(
+pending.auditId,
+pending.matchId,
+pending.action,
+pending.performedBy,
+pending.details
+);
+
+clearPendingOperation();
+}
+
+/**
+
+* Saves the recovery journal before changing scores.
+* The journal is cleared only after both score storage
+* and central audit storage have succeeded.
+  */
+  function commitScoresAndAudit(
+  scores: EventScoreRecord[],
+  score: EventScoreRecord,
+  action: ScoreAuditAction,
+  actorId: string,
+  actorName: string,
+  reason?: string
+  ): void {
+  const auditLog = Array.isArray(score.auditLog)
+  ? score.auditLog
+  : [];
+
+const last = auditLog[auditLog.length - 1];
+
+const operation: PendingScoreOperation = {
+auditId: id(),
+scores,
+matchId: matchId(score)?.trim() || `event:${score.eventId}`,
+action,
+performedBy: actorName,
+details: {
+eventId: score.eventId,
+scoreRecordId: score.id,
+athleteId: athleteId(score),
+actorId,
+scoringEngine: String(score.scoringEngine),
+status: score.status,
+scoreData: score.data,
+previousValue: last?.previousValue,
+newValue: last?.newValue,
+reason: reason?.trim() || last?.reason,
+},
+};
+
+savePendingOperation(operation);
+
+recoverPendingOperation();
 }
 
 // --------------------------------------------------
 // ACTOR AND EVENT AUTHORIZATION
 // --------------------------------------------------
 
-function requireActor(actorId: string, actorName: string): void {
-  if (!actorId?.trim() || !actorName?.trim()) {
-    throw new Error("The acting user's ID and name are required.");
-  }
+function requireActor(
+actorId: string,
+actorName: string
+): void {
+if (!actorId?.trim() || !actorName?.trim()) {
+throw new Error(
+"The acting user's ID and name are required."
+);
+}
 
-  const access = getCurrentInchargeAccess();
+const access = getCurrentInchargeAccess();
 
-  if (
-    !access ||
-    access.userId !== actorId ||
-    access.userName.trim().toLowerCase() !==
-      actorName.trim().toLowerCase()
-  ) {
-    throw new Error(
-      "The current In-Charge identity does not match the active account."
-    );
-  }
+if (
+!access ||
+access.userId !== actorId ||
+access.userName.trim().toLowerCase() !==
+actorName.trim().toLowerCase()
+) {
+throw new Error(
+"The current In-Charge identity does not match the active account."
+);
+}
 }
 
 function requireEvent(eventId: string): void {
-  if (!canScoreEvent(eventId)) {
+if (!canScoreEvent(eventId)) {
+throw new Error(
+"Access denied. You must be an active, unexpired In-Charge assigned to this event."
+);
+}
+}
+
+// --------------------------------------------------
+// CENTRALIZED SCORE VALIDATION
+// --------------------------------------------------
+
+function requireValidScore(
+  scoringEngine: EventScoreRecord["scoringEngine"],
+  data: SportScoreData
+): void {
+  const result = validateScore(scoringEngine, data);
+
+  if (!result.valid) {
     throw new Error(
-      "Access denied. You must be an active, unexpired In-Charge assigned to this event."
+      `Invalid ${scoringEngine} score:\n${result.errors.join("\n")}`
     );
   }
-}
-
-// --------------------------------------------------
-// CENTRAL AUDIT
-// --------------------------------------------------
-
-function auditRef(s: EventScoreRecord): string {
-  return matchId(s)?.trim() || `event:${s.eventId}`;
-}
-
-function audit(
-  s: EventScoreRecord,
-  action:
-    | "Score Saved"
-    | "Score Submitted"
-    | "Score Corrected"
-    | "Score Locked",
-  actorId: string,
-  actorName: string,
-  reason?: string
-): void {
-  const auditLog = Array.isArray(s.auditLog) ? s.auditLog : [];
-  const last = auditLog[auditLog.length - 1];
-
-  // Central audit errors intentionally propagate.
-  // They must not be silently ignored.
-  addScoreAudit(auditRef(s), action, actorName, {
-    eventId: s.eventId,
-    scoreRecordId: s.id,
-    athleteId: athleteId(s),
-    actorId,
-    scoringEngine: String(s.scoringEngine),
-    status: s.status,
-    scoreData: s.data,
-    previousValue: last?.previousValue,
-    newValue: last?.newValue,
-    reason: reason?.trim() || last?.reason,
-  });
 }
 
 // --------------------------------------------------
@@ -148,13 +305,13 @@ function audit(
 // --------------------------------------------------
 
 function entry(
-  data: Omit<ScoreAuditEntry, "id" | "timestamp">
+data: Omit<ScoreAuditEntry, "id" | "timestamp">
 ): ScoreAuditEntry {
-  return {
-    ...data,
-    id: id(),
-    timestamp: new Date().toISOString(),
-  };
+return {
+...data,
+id: id(),
+timestamp: new Date().toISOString(),
+};
 }
 
 // --------------------------------------------------
@@ -162,23 +319,30 @@ function entry(
 // --------------------------------------------------
 
 function correctionWindow(s: EventScoreRecord): void {
-  if (s.status !== "submitted" || !s.submittedAt) {
-    throw new Error("Only submitted scores can be corrected.");
-  }
+if (s.status !== "submitted" || !s.submittedAt) {
+throw new Error(
+"Only submitted scores can be corrected."
+);
+}
 
-  const submittedTime = new Date(s.submittedAt).getTime();
+const submittedTime = new Date(s.submittedAt).getTime();
 
-  if (!Number.isFinite(submittedTime)) {
-    throw new Error("Invalid score submission timestamp.");
-  }
+if (!Number.isFinite(submittedTime)) {
+throw new Error(
+"Invalid score submission timestamp."
+);
+}
 
-  const elapsed = Date.now() - submittedTime;
+const elapsed = Date.now() - submittedTime;
 
-  if (elapsed < 0 || elapsed >= SCORE_CORRECTION_WINDOW_MS) {
-    throw new Error(
-      "The 45-minute score correction window has expired or is invalid."
-    );
-  }
+if (
+elapsed < 0 ||
+elapsed >= SCORE_CORRECTION_WINDOW_MS
+) {
+throw new Error(
+"The 45-minute score correction window has expired or is invalid."
+);
+}
 }
 
 // --------------------------------------------------
@@ -186,63 +350,71 @@ function correctionWindow(s: EventScoreRecord): void {
 // --------------------------------------------------
 
 function reconcileLocks(): EventScoreRecord[] {
-  const now = Date.now();
-  let changed = false;
+let scores = read();
+const now = Date.now();
 
-  const result = read().map((score) => {
-    if (score.status !== "submitted" || !score.submittedAt) {
-      return score;
-    }
+for (let index = 0; index < scores.length; index++) {
+const score = scores[index];
 
-    const submittedTime = new Date(score.submittedAt).getTime();
+if (
+  score.status !== "submitted" ||
+  !score.submittedAt
+) {
+  continue;
+}
 
-    if (!Number.isFinite(submittedTime)) {
-      return score;
-    }
+const submittedTime = new Date(
+  score.submittedAt
+).getTime();
 
-    if (now - submittedTime < SCORE_CORRECTION_WINDOW_MS) {
-      return score;
-    }
+if (!Number.isFinite(submittedTime)) {
+  continue;
+}
 
-    changed = true;
+if (
+  now - submittedTime <
+  SCORE_CORRECTION_WINDOW_MS
+) {
+  continue;
+}
 
-    const when = new Date(now).toISOString();
+const when = new Date(now).toISOString();
 
-    const locked: EventScoreRecord = {
-      ...score,
-      status: "locked",
-      lockedAt: when,
-      lockedBy: "system",
-      updatedAt: when,
-      auditLog: [
-        ...score.auditLog,
-        entry({
-          action: "score_locked",
-          actorId: "system",
-          actorName: "System (automatic lock)",
-          previousValue: "submitted",
-          newValue: "locked",
-          reason: "45-minute correction window elapsed.",
-        }),
-      ],
-    };
+const locked: EventScoreRecord = {
+  ...score,
+  status: "locked",
+  lockedAt: when,
+  lockedBy: "system",
+  updatedAt: when,
+  auditLog: [
+    ...(Array.isArray(score.auditLog)
+      ? score.auditLog
+      : []),
+    entry({
+      action: "score_locked",
+      actorId: "system",
+      actorName: "System (automatic lock)",
+      previousValue: "submitted",
+      newValue: "locked",
+      reason: "45-minute correction window elapsed.",
+    }),
+  ],
+};
 
-    audit(
-      locked,
-      "Score Locked",
-      "system",
-      "System (automatic lock)",
-      "45-minute correction window elapsed."
-    );
+scores[index] = locked;
 
-    return locked;
-  });
+commitScoresAndAudit(
+  scores,
+  locked,
+  "Score Locked",
+  "system",
+  "System (automatic lock)",
+  "45-minute correction window elapsed."
+);
 
-  if (changed && typeof window !== "undefined") {
-    write(result);
-  }
+}
 
-  return result;
+return scores;
 }
 
 // --------------------------------------------------
@@ -250,55 +422,58 @@ function reconcileLocks(): EventScoreRecord[] {
 // --------------------------------------------------
 
 export function getAllScores(): EventScoreRecord[] {
-  return reconcileLocks();
+recoverPendingOperation();
+return reconcileLocks();
 }
 
 export function getScoresByEvent(
-  eventId: string
+eventId: string
 ): EventScoreRecord[] {
-  return getAllScores().filter(
-    (score) => score.eventId === eventId
-  );
+return getAllScores().filter(
+(score) => score.eventId === eventId
+);
 }
 
 export function getScoresByMatch(
-  id: string
+id: string
 ): EventScoreRecord[] {
-  return getAllScores().filter(
-    (score) => matchId(score) === id
-  );
+return getAllScores().filter(
+(score) => matchId(score) === id
+);
 }
 
 export function getScoresByAthlete(
-  eventId: string,
-  athlete: string
+eventId: string,
+athlete: string
 ): EventScoreRecord[] {
-  return getAllScores().filter(
-    (score) =>
-      score.eventId === eventId &&
-      athleteId(score) === athlete
-  );
+return getAllScores().filter(
+(score) =>
+score.eventId === eventId &&
+athleteId(score) === athlete
+);
 }
 
 export function getScoreByMatchAndAthlete(
-  match: string,
-  athlete: string
+match: string,
+athlete: string
 ): EventScoreRecord | null {
-  return (
-    getAllScores().find(
-      (score) =>
-        matchId(score) === match &&
-        athleteId(score) === athlete
-    ) ?? null
-  );
+return (
+getAllScores().find(
+(score) =>
+matchId(score) === match &&
+athleteId(score) === athlete
+) ?? null
+);
 }
 
 export function getScoreById(
-  scoreId: string
+scoreId: string
 ): EventScoreRecord | null {
-  return (
-    getAllScores().find((score) => score.id === scoreId) ?? null
-  );
+return (
+getAllScores().find(
+(score) => score.id === scoreId
+) ?? null
+);
 }
 
 // --------------------------------------------------
@@ -306,74 +481,78 @@ export function getScoreById(
 // --------------------------------------------------
 
 type CreateInput = {
-  eventId: string;
-  scoringEngine: EventScoreRecord["scoringEngine"];
-  data: SportScoreData;
-  sportId?: string;
-  matchId?: string;
-  athleteId?: string;
-  actorId: string;
-  actorName: string;
+eventId: string;
+scoringEngine: EventScoreRecord["scoringEngine"];
+data: SportScoreData;
+sportId?: string;
+matchId?: string;
+athleteId?: string;
+actorId: string;
+actorName: string;
 };
 
 export function createScore(
-  input: CreateInput
+input: CreateInput
 ): EventScoreRecord {
-  requireActor(input.actorId, input.actorName);
-  requireEvent(input.eventId);
+requireActor(input.actorId, input.actorName);
+requireEvent(input.eventId);
 
-  const match = input.matchId?.trim() || undefined;
-  const athlete = input.athleteId?.trim() || undefined;
+requireValidScore(
+input.scoringEngine,
+input.data
+);
 
-  const scores = getAllScores();
+const match = input.matchId?.trim() || undefined;
+const athlete = input.athleteId?.trim() || undefined;
 
-  if (
-    match &&
-    athlete &&
-    scores.some(
-      (score) =>
-        matchId(score) === match &&
-        athleteId(score) === athlete
-    )
-  ) {
-    throw new Error(
-      "A score record already exists for this athlete in this match."
-    );
-  }
+const scores = getAllScores();
 
-  const now = new Date().toISOString();
+if (
+match &&
+athlete &&
+scores.some(
+(score) =>
+matchId(score) === match &&
+athleteId(score) === athlete
+)
+) {
+throw new Error(
+"A score record already exists for this athlete in this match."
+);
+}
 
-  const record: ExtendedScore = {
-    id: id(),
-    eventId: input.eventId,
-    matchId: match,
-    athleteId: athlete,
-    sportId: input.sportId,
-    scoringEngine: input.scoringEngine,
-    status: "draft",
-    data: input.data,
-    createdAt: now,
-    updatedAt: now,
-    auditLog: [
-      entry({
-        action: "score_created",
-        actorId: input.actorId,
-        actorName: input.actorName,
-        newValue: input.data,
-      }),
-    ],
-  };
+const now = new Date().toISOString();
 
-  write([...scores, record]);
+const record: ExtendedScore = {
+id: id(),
+eventId: input.eventId,
+matchId: match,
+athleteId: athlete,
+sportId: input.sportId,
+scoringEngine: input.scoringEngine,
+status: "draft",
+data: input.data,
+createdAt: now,
+updatedAt: now,
+auditLog: [
+entry({
+action: "score_created",
+actorId: input.actorId,
+actorName: input.actorName,
+newValue: input.data,
+}),
+],
+};
 
-  audit(
-    record,
-    "Score Saved",
-    input.actorId,
-    input.actorName
-  );
+commitScoresAndAudit(
+[...scores, record],
+record,
+"Score Saved",
+input.actorId,
+input.actorName
+);
 
-  return record;
+return record;
 }
 
 // --------------------------------------------------
@@ -381,22 +560,22 @@ export function createScore(
 // --------------------------------------------------
 
 export function createScoreForEvent(
-  event: SportEvent,
-  actorId: string,
-  actorName: string
+event: SportEvent,
+actorId: string,
+actorName: string
 ): EventScoreRecord {
-  requireEvent(event.id);
+requireEvent(event.id);
 
-  const prepared = prepareEventScore(event);
+const prepared = prepareEventScore(event);
 
-  return createScore({
-    eventId: prepared.eventId,
-    sportId: prepared.sportId,
-    scoringEngine: prepared.scoringEngine,
-    data: prepared.data,
-    actorId,
-    actorName,
-  });
+return createScore({
+eventId: prepared.eventId,
+sportId: prepared.sportId,
+scoringEngine: prepared.scoringEngine,
+data: prepared.data,
+actorId,
+actorName,
+});
 }
 
 // --------------------------------------------------
@@ -404,33 +583,35 @@ export function createScoreForEvent(
 // --------------------------------------------------
 
 export function createScoreForMatchAthlete(
-  event: SportEvent,
-  match: string,
-  athlete: string,
-  actorId: string,
-  actorName: string
+event: SportEvent,
+match: string,
+athlete: string,
+actorId: string,
+actorName: string
 ): EventScoreRecord {
-  if (!match.trim() || !athlete.trim()) {
-    throw new Error("A match ID and athlete ID are required.");
-  }
+if (!match.trim() || !athlete.trim()) {
+throw new Error(
+"A match ID and athlete ID are required."
+);
+}
 
-  requireEvent(event.id);
+requireEvent(event.id);
 
-  const prepared = prepareEventScore(event, {
-    matchId: match,
-    athleteId: athlete,
-  });
+const prepared = prepareEventScore(event, {
+matchId: match,
+athleteId: athlete,
+});
 
-  return createScore({
-    eventId: prepared.eventId,
-    matchId: prepared.matchId,
-    athleteId: prepared.athleteId,
-    sportId: prepared.sportId,
-    scoringEngine: prepared.scoringEngine,
-    data: prepared.data,
-    actorId,
-    actorName,
-  });
+return createScore({
+eventId: prepared.eventId,
+matchId: prepared.matchId,
+athleteId: prepared.athleteId,
+sportId: prepared.sportId,
+scoringEngine: prepared.scoringEngine,
+data: prepared.data,
+actorId,
+actorName,
+});
 }
 
 // --------------------------------------------------
@@ -438,63 +619,71 @@ export function createScoreForMatchAthlete(
 // --------------------------------------------------
 
 export function updateDraftScore(
-  scoreId: string,
-  data: SportScoreData,
-  actorId: string,
-  actorName: string,
-  reason: string
+scoreId: string,
+data: SportScoreData,
+actorId: string,
+actorName: string,
+reason: string
 ): EventScoreRecord {
-  requireActor(actorId, actorName);
+requireActor(actorId, actorName);
 
-  if (!reason.trim()) {
-    throw new Error("Please provide a reason for the score change.");
-  }
+if (!reason.trim()) {
+throw new Error(
+"Please provide a reason for the score change."
+);
+}
 
-  const scores = getAllScores();
-  const index = scores.findIndex((score) => score.id === scoreId);
+const scores = getAllScores();
 
-  if (index < 0) {
-    throw new Error("Score record not found.");
-  }
+const index = scores.findIndex(
+(score) => score.id === scoreId
+);
 
-  const old = scores[index];
+if (index < 0) {
+throw new Error("Score record not found.");
+}
 
-  requireEvent(old.eventId);
+const old = scores[index];
 
-  if (old.status !== "draft") {
-    throw new Error("Only draft scores can be edited here.");
-  }
+requireEvent(old.eventId);
 
-  const updated: EventScoreRecord = {
-    ...old,
-    data,
-    updatedAt: new Date().toISOString(),
-    auditLog: [
-      ...old.auditLog,
-      entry({
-        action: "draft_score_updated",
-        actorId,
-        actorName,
-        previousValue: old.data,
-        newValue: data,
-        reason: reason.trim(),
-      }),
-    ],
-  };
+if (old.status !== "draft") {
+throw new Error(
+"Only draft scores can be edited here."
+);
+}
 
-  scores[index] = updated;
+requireValidScore(old.scoringEngine, data);
 
-  write(scores);
+const updated: EventScoreRecord = {
+...old,
+data,
+updatedAt: new Date().toISOString(),
+auditLog: [
+...old.auditLog,
+entry({
+action: "draft_score_updated",
+actorId,
+actorName,
+previousValue: old.data,
+newValue: data,
+reason: reason.trim(),
+}),
+],
+};
 
-  audit(
-    updated,
-    "Score Saved",
-    actorId,
-    actorName,
-    reason.trim()
-  );
+scores[index] = updated;
 
-  return updated;
+commitScoresAndAudit(
+scores,
+updated,
+"Score Saved",
+actorId,
+actorName,
+reason.trim()
+);
+
+return updated;
 }
 
 // --------------------------------------------------
@@ -502,59 +691,65 @@ export function updateDraftScore(
 // --------------------------------------------------
 
 export function submitScore(
-  scoreId: string,
-  actorId: string,
-  actorName: string
+scoreId: string,
+actorId: string,
+actorName: string
 ): EventScoreRecord {
-  requireActor(actorId, actorName);
+requireActor(actorId, actorName);
 
-  const scores = getAllScores();
-  const index = scores.findIndex((score) => score.id === scoreId);
+const scores = getAllScores();
 
-  if (index < 0) {
-    throw new Error("Score record not found.");
-  }
+const index = scores.findIndex(
+(score) => score.id === scoreId
+);
 
-  const old = scores[index];
+if (index < 0) {
+throw new Error("Score record not found.");
+}
 
-  requireEvent(old.eventId);
+const old = scores[index];
 
-  if (old.status !== "draft") {
-    throw new Error("Only draft scores can be submitted.");
-  }
+requireEvent(old.eventId);
 
-  const now = new Date().toISOString();
+if (old.status !== "draft") {
+throw new Error(
+"Only draft scores can be submitted."
+);
+}
 
-  const updated: EventScoreRecord = {
-    ...old,
-    status: "submitted",
-    submittedAt: now,
-    submittedBy: actorId,
-    updatedAt: now,
-    auditLog: [
-      ...old.auditLog,
-      entry({
-        action: "score_submitted",
-        actorId,
-        actorName,
-        previousValue: old.status,
-        newValue: "submitted",
-      }),
-    ],
-  };
+requireValidScore(old.scoringEngine, old.data);
 
-  scores[index] = updated;
+const now = new Date().toISOString();
 
-  write(scores);
+const updated: EventScoreRecord = {
+...old,
+status: "submitted",
+submittedAt: now,
+submittedBy: actorId,
+updatedAt: now,
+auditLog: [
+...old.auditLog,
+entry({
+action: "score_submitted",
+actorId,
+actorName,
+previousValue: old.status,
+newValue: "submitted",
+}),
+],
+};
 
-  audit(
-    updated,
-    "Score Submitted",
-    actorId,
-    actorName
-  );
+scores[index] = updated;
 
-  return updated;
+commitScoresAndAudit(
+scores,
+updated,
+"Score Submitted",
+actorId,
+actorName
+);
+
+return updated;
 }
 
 // --------------------------------------------------
@@ -562,60 +757,66 @@ export function submitScore(
 // --------------------------------------------------
 
 export function correctSubmittedScore(
-  scoreId: string,
-  data: SportScoreData,
-  actorId: string,
-  actorName: string,
-  reason: string
+scoreId: string,
+data: SportScoreData,
+actorId: string,
+actorName: string,
+reason: string
 ): EventScoreRecord {
-  requireActor(actorId, actorName);
+requireActor(actorId, actorName);
 
-  if (!reason.trim()) {
-    throw new Error("Please provide a reason for the correction.");
-  }
+if (!reason.trim()) {
+throw new Error(
+"Please provide a reason for the score correction."
+);
+}
 
-  const scores = getAllScores();
-  const index = scores.findIndex((score) => score.id === scoreId);
+const scores = getAllScores();
 
-  if (index < 0) {
-    throw new Error("Score record not found.");
-  }
+const index = scores.findIndex(
+(score) => score.id === scoreId
+);
 
-  const old = scores[index];
+if (index < 0) {
+throw new Error("Score record not found.");
+}
 
-  requireEvent(old.eventId);
-  correctionWindow(old);
+const old = scores[index];
 
-  const updated: EventScoreRecord = {
-    ...old,
-    data,
-    updatedAt: new Date().toISOString(),
-    auditLog: [
-      ...old.auditLog,
-      entry({
-        action: "submitted_score_corrected",
-        actorId,
-        actorName,
-        previousValue: old.data,
-        newValue: data,
-        reason: reason.trim(),
-      }),
-    ],
-  };
+requireEvent(old.eventId);
+correctionWindow(old);
 
-  scores[index] = updated;
+requireValidScore(old.scoringEngine, data);
 
-  write(scores);
+const updated: EventScoreRecord = {
+...old,
+data,
+updatedAt: new Date().toISOString(),
+auditLog: [
+...old.auditLog,
+entry({
+action: "submitted_score_corrected",
+actorId,
+actorName,
+previousValue: old.data,
+newValue: data,
+reason: reason.trim(),
+}),
+],
+};
 
-  audit(
-    updated,
-    "Score Corrected",
-    actorId,
-    actorName,
-    reason.trim()
-  );
+scores[index] = updated;
 
-  return updated;
+commitScoresAndAudit(
+scores,
+updated,
+"Score Corrected",
+actorId,
+actorName,
+reason.trim()
+);
+
+return updated;
 }
 
 // --------------------------------------------------
@@ -623,59 +824,63 @@ export function correctSubmittedScore(
 // --------------------------------------------------
 
 export function lockScore(
-  scoreId: string,
-  actorId: string,
-  actorName: string
+scoreId: string,
+actorId: string,
+actorName: string
 ): EventScoreRecord {
-  requireActor(actorId, actorName);
+requireActor(actorId, actorName);
 
-  const scores = getAllScores();
-  const index = scores.findIndex((score) => score.id === scoreId);
+const scores = getAllScores();
 
-  if (index < 0) {
-    throw new Error("Score record not found.");
-  }
+const index = scores.findIndex(
+(score) => score.id === scoreId
+);
 
-  const old = scores[index];
+if (index < 0) {
+throw new Error("Score record not found.");
+}
 
-  requireEvent(old.eventId);
+const old = scores[index];
 
-  if (old.status !== "submitted") {
-    throw new Error("Only submitted scores can be locked.");
-  }
+requireEvent(old.eventId);
 
-  const now = new Date().toISOString();
+if (old.status !== "submitted") {
+throw new Error(
+"Only submitted scores can be locked."
+);
+}
 
-  const updated: EventScoreRecord = {
-    ...old,
-    status: "locked",
-    lockedAt: now,
-    lockedBy: actorId,
-    updatedAt: now,
-    auditLog: [
-      ...old.auditLog,
-      entry({
-        action: "score_locked",
-        actorId,
-        actorName,
-        previousValue: old.status,
-        newValue: "locked",
-      }),
-    ],
-  };
+const now = new Date().toISOString();
 
-  scores[index] = updated;
+const updated: EventScoreRecord = {
+...old,
+status: "locked",
+lockedAt: now,
+lockedBy: actorId,
+updatedAt: now,
+auditLog: [
+...old.auditLog,
+entry({
+action: "score_locked",
+actorId,
+actorName,
+previousValue: old.status,
+newValue: "locked",
+}),
+],
+};
 
-  write(scores);
+scores[index] = updated;
 
-  audit(
-    updated,
-    "Score Locked",
-    actorId,
-    actorName
-  );
+commitScoresAndAudit(
+scores,
+updated,
+"Score Locked",
+actorId,
+actorName
+);
 
-  return updated;
+return updated;
 }
 
 // --------------------------------------------------
@@ -683,9 +888,9 @@ export function lockScore(
 // --------------------------------------------------
 
 export function getScoreAuditLog(
-  scoreId: string
+scoreId: string
 ): ScoreAuditEntry[] {
-  return getScoreById(scoreId)?.auditLog ?? [];
+return getScoreById(scoreId)?.auditLog ?? [];
 }
 
 // --------------------------------------------------
@@ -693,9 +898,9 @@ export function getScoreAuditLog(
 // --------------------------------------------------
 
 export function getScoresByStatus(
-  status: ScoreStatus
+status: ScoreStatus
 ): EventScoreRecord[] {
-  return getAllScores().filter(
-    (score) => score.status === status
-  );
+return getAllScores().filter(
+(score) => score.status === status
+);
 }

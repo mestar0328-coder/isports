@@ -234,7 +234,7 @@ function ArcheryScoreEntry({
     a: number,
     raw: string
   ) => {
-    if (!/^\\d*$/.test(raw)) return;
+    if (!/^\d*$/.test(raw)) return;
  
     const value = raw === "" ? 0 : Number(raw);
  
@@ -1521,7 +1521,7 @@ export default function ScoreEntryPage() {
                   value={side.value}
                   disabled={locked}
                   onChange={(e) => {
-                    if (/^\\d*$/.test(e.target.value)) {
+                    if (/^\d*$/.test(e.target.value)) {
                       side.set(e.target.value);
                     }
                   }}
