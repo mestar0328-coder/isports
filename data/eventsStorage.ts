@@ -30,6 +30,6 @@ export const updateEvent = (updated: SportEvent): void => {
   const events = getEvents();
   const old = events.find(x => x.id === updated.id);
   if (!old) throw new Error("Event not found.");
-  const next = { ...updated, scoringEngine: updated.scoringEngine ?? old.scoringEngine ?? resolveScoringEngine(updated) };
+  const next = { ...updated, scoringEngine: resolveScoringEngine(updated) };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(events.map(x => x.id === next.id ? next : x)));
 };

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
  
-import { getEvents } from "@/data/eventsStorage";
+import { getEvents, getEventScoringEngine } from "@/data/eventsStorage";
 import { getMatches, StoredMatch } from "@/data/matchStorage";
 import { getScores, saveScore, StoredScore } from "@/data/scoreStorage";
 import { canAccessEvent, isInchargeAuthorized } from "@/data/inchargeAuth";
@@ -29,36 +29,7 @@ import type {
  
 const CORRECTION_TIME = 45 * 60 * 1000;
  
-function resolveScoringEngine(
-  event: NonNullable<ReturnType<typeof getEvents>[number]>
-) {
-  const details = event as unknown as Record<string, unknown>;
-  const config = details.scoringConfig as Record<string, unknown> | undefined;
-  const configuredEngine =
-    details.scoringEngine ?? details.scoringType ?? config?.engine;
- 
-  if (
-    configuredEngine === "target-precision" ||
-    configuredEngine === "time-race" ||
-    configuredEngine === "goal-points"
-  ) {
-    return configuredEngine;
-  }
- 
-  const sport = String(details.sport ?? "").toLowerCase();
- 
-  if (sport.includes("archery")) return "target-precision";
- 
-  if (
-    sport.includes("athletic") ||
-    sport.includes("track") ||
-    sport.includes("running")
-  ) {
-    return "time-race";
-  }
- 
-  return "custom";
-}
+
  
 type Actor = {
   id: string;
@@ -949,11 +920,11 @@ export default function ScoreEntryPage() {
  
   const assignedEvent = match
     ? events.find((event) => event.id === match.eventId)
-    : null;
+    : undefined;
  
   const scoringEngine = assignedEvent
-    ? resolveScoringEngine(assignedEvent)
-    : "custom";
+    ? getEventScoringEngine(assignedEvent)
+    : undefined;
  
   const scoreUnit = assignedEvent?.scoringUnit?.trim() || "Points";
  

@@ -11,8 +11,16 @@ export type SportScoringProfile = Pick<
   | "scoringConfig"
 >;
 
-const normalizeName = (name: string): string =>
-  name.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ");
+const normalizeName = (name: string): string => {
+  const normalized = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ");
+
+  // Support the alternate spelling "Kabbadi".
+  if (normalized === "kabbadi") {
+    return "kabaddi";
+  }
+
+  return normalized;
+};
 
 const METHOD_ENGINE: Record<ScoringMethod, SportScoringEngine> = {
   time: "time-race",

@@ -1,63 +1,64 @@
-import type {
-  ScoringEngine,
-  SportEvent,
-} from "@/types/events";
-
+import type { ScoringEngine, SportEvent } from "@/types/events";
 import {
-  findScoringEngineForSport,
   getScoringEngineById,
 } from "@/lib/scoring/registry";
-
 import {
   getScoringEngineForMethod,
+  getSportScoringProfile,
 } from "@/lib/scoring/configuration";
 
-// --------------------------------------------------
-// CENTRALIZED ENGINE RESOLUTION
-// --------------------------------------------------
+export class ScoringConfigurationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ScoringConfigurationError";
+  }
+}
+
+type ScoringEventConfiguration = Pick<
+  SportEvent,
+  "sport" | "scoringMethod" | "scoringEngine"
+>;
 
 export function resolveScoringEngine(
-  event: Pick<
-    SportEvent,
-    "sport" | "scoringEngine" | "scoringMethod"
-  >
+  event: ScoringEventConfiguration
 ): ScoringEngine {
   const sportName = event.sport?.trim() ?? "";
+  const method = event.scoringMethod;
 
-  // 1. Respect an explicitly configured supported engine.
-  if (event.scoringEngine) {
-    const registeredEngine = getScoringEngineById(
-      event.scoringEngine
-    );
+  // The selected scoring method is authoritative.
+  // Never allow a previously saved engine to override it.
+  if (method) {
+    const engine = getScoringEngineForMethod(method, sportName);
+    const registeredEngine = getScoringEngineById(engine);
 
-    if (registeredEngine) {
-      return registeredEngine.id;
+    if (!registeredEngine) {
+      throw new ScoringConfigurationError(
+        `The scoring method "${method}" for "${sportName || "this sport"}" does not have a supported scoring engine. Please correct the sport's scoring configuration.`
+      );
+    }
+
+    return registeredEngine.id;
+  }
+
+  // Legacy events without a saved method may use their registered
+  // sport profile to recover the intended scoring configuration.
+  if (sportName) {
+    const profile = getSportScoringProfile(sportName);
+
+    if (profile?.scoringEngine) {
+      const registeredEngine = getScoringEngineById(
+        profile.scoringEngine
+      );
+
+      if (registeredEngine) {
+        return registeredEngine.id;
+      }
     }
   }
 
-  // 2. Resolve using the centralized scoring configuration.
-  if (event.scoringMethod) {
-    const configuredEngine = getScoringEngineForMethod(
-      event.scoringMethod,
-      sportName
-    );
-
-    const registeredEngine = getScoringEngineById(
-      configuredEngine
-    );
-
-    if (registeredEngine) {
-      return registeredEngine.id;
-    }
-  }
-
-  // 3. Resolve from the registered sport configuration.
-  const sportEngine = findScoringEngineForSport(sportName);
-
-  if (sportEngine) {
-    return sportEngine.id;
-  }
-
-  // 4. Safe fallback for unsupported or unconfigured sports.
-  return "custom";
+  // Do not silently turn unknown or unconfigured sports into
+  // generic custom-scoring events.
+  throw new ScoringConfigurationError(
+    `No scoring method is configured for "${sportName || "this sport"}". Select a supported scoring method in the sport or event configuration before continuing.`
+  );
 }
