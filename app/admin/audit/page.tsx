@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -58,7 +58,7 @@ function escapeCSV(value: string | number) {
 }
 
 function formatAuditDetailValue(key: string, value: unknown): string {
-  if (value === null || value === undefined) return "—";
+  if (value === null || value === undefined) return "â€”";
 
   if (
     key.toLowerCase().includes("elapsedmilliseconds") &&
@@ -356,43 +356,104 @@ export default function AuditPage() {
       .sort((a, b) => b.total - a.total);
   }, [filteredLogs, matches]);
 
-  const filteredAlerts = useMemo(
-    () =>
-      auditAlerts.filter(
-        (alert) =>
-          selectedAlertStatus === "All" ||
-          alert.status === selectedAlertStatus
-      ),
-    [auditAlerts, selectedAlertStatus]
-  );
+  // Apply the page-level filters to alert records as well as score-audit records.
+  // Alert records do not contain a separate action field; all current alert types
+  // are generated from score-correction activity, so "Score Corrected" is the
+  // only action filter that corresponds to an alert.
+  const filteredAlerts = useMemo(() => {
+    const query = search.trim().toLowerCase();
 
-  const totalAlerts = auditAlerts.length;
-  const pendingAlerts = auditAlerts.filter(
+    return auditAlerts.filter((alert) => {
+      const match = matches.find((item) => item.id === alert.matchId);
+      const eventId = alert.eventId || match?.eventId || "";
+      const eventName = eventId ? getEventName(eventId, events) : "";
+      const matchName = getMatchName(alert.matchId, matches);
+
+      const matchesIncharge =
+        selectedIncharge === "All" || alert.performedBy === selectedIncharge;
+      const matchesEvent =
+        selectedEvent === "All" || eventId === selectedEvent;
+      const matchesMatch =
+        selectedMatch === "All" || alert.matchId === selectedMatch;
+      const matchesStatus =
+        selectedAlertStatus === "All" || alert.status === selectedAlertStatus;
+
+      // Current alert rules are all based on score corrections.
+      const matchesAction =
+        selectedAction === "All" || selectedAction === "Score Corrected";
+
+      const detectedDate = parseAuditDate(alert.detectedAt);
+      const alertDate = detectedDate ? formatDateInput(alert.detectedAt) : "";
+      const matchesDate =
+        (!dateFrom || !alertDate || alertDate >= dateFrom) &&
+        (!dateTo || !alertDate || alertDate <= dateTo);
+
+      const searchableText = [
+        alert.id,
+        alert.type,
+        alert.severity,
+        alert.status,
+        alert.performedBy,
+        alert.reason,
+        alert.matchId,
+        matchName,
+        eventId,
+        eventName,
+      ].join(" ").toLowerCase();
+      const matchesSearch = !query || searchableText.includes(query);
+
+      return (
+        matchesIncharge &&
+        matchesEvent &&
+        matchesMatch &&
+        matchesStatus &&
+        matchesAction &&
+        matchesDate &&
+        matchesSearch
+      );
+    });
+  }, [
+    auditAlerts,
+    matches,
+    events,
+    search,
+    selectedIncharge,
+    selectedEvent,
+    selectedMatch,
+    selectedAction,
+    selectedAlertStatus,
+    dateFrom,
+    dateTo,
+  ]);
+
+  // Alert Overview cards and type breakdown use the same filtered alert set.
+  const totalAlerts = filteredAlerts.length;
+  const pendingAlerts = filteredAlerts.filter(
     (alert) => alert.status === "Pending Review"
   ).length;
-  const reviewedAlerts = auditAlerts.filter(
+  const reviewedAlerts = filteredAlerts.filter(
     (alert) => alert.status === "Reviewed"
   ).length;
-  const dismissedAlerts = auditAlerts.filter(
+  const dismissedAlerts = filteredAlerts.filter(
     (alert) => alert.status === "Dismissed"
   ).length;
-  const highAlerts = auditAlerts.filter(
+  const highAlerts = filteredAlerts.filter(
     (alert) => alert.severity === "High"
   ).length;
-  const mediumAlerts = auditAlerts.filter(
+  const mediumAlerts = filteredAlerts.filter(
     (alert) => alert.severity === "Medium"
   ).length;
-  const lowAlerts = auditAlerts.filter(
+  const lowAlerts = filteredAlerts.filter(
     (alert) => alert.severity === "Low"
   ).length;
 
-  const repeatedCorrectionAlerts = auditAlerts.filter(
+  const repeatedCorrectionAlerts = filteredAlerts.filter(
     (alert) => alert.type === "Repeated Corrections"
   ).length;
-  const rapidCorrectionAlerts = auditAlerts.filter(
+  const rapidCorrectionAlerts = filteredAlerts.filter(
     (alert) => alert.type === "Rapid Corrections"
   ).length;
-  const highActivityAlerts = auditAlerts.filter(
+  const highActivityAlerts = filteredAlerts.filter(
     (alert) => alert.type === "High Correction Activity"
   ).length;
 
@@ -554,7 +615,7 @@ export default function AuditPage() {
               href="/admin"
               className="rounded-lg border border-slate-700 bg-slate-900 px-4 py-2 font-semibold hover:bg-slate-800"
             >
-              ← Back to Admin
+              â† Back to Admin
             </Link>
             <button
               onClick={loadAuditData}
@@ -770,7 +831,7 @@ export default function AuditPage() {
                       </span>
                     </div>
                     <div className="mt-2 text-xs text-slate-500">
-                      Submitted: {item.submitted} · Corrected: {item.corrected} ·
+                      Submitted: {item.submitted} Â· Corrected: {item.corrected} Â·
                       Locked: {item.locked}
                     </div>
                   </div>
@@ -795,7 +856,7 @@ export default function AuditPage() {
                       <span className="text-sm text-slate-400">{item.total}</span>
                     </div>
                     <div className="mt-2 text-xs text-slate-500">
-                      Submitted: {item.submitted} · Corrected: {item.corrected}
+                      Submitted: {item.submitted} Â· Corrected: {item.corrected}
                     </div>
                   </div>
                 ))
@@ -819,7 +880,7 @@ export default function AuditPage() {
                       <span className="text-sm text-slate-400">{item.total}</span>
                     </div>
                     <div className="mt-2 text-xs text-slate-500">
-                      Submitted: {item.submitted} · Corrected: {item.corrected} ·
+                      Submitted: {item.submitted} Â· Corrected: {item.corrected} Â·
                       Locked: {item.locked}
                     </div>
                   </div>
@@ -833,7 +894,7 @@ export default function AuditPage() {
           <div className="mb-4">
             <h2 className="text-xl font-bold">Alert Overview</h2>
             <p className="mt-1 text-sm text-slate-400">
-              Current audit alert status and severity distribution.
+Alert counts and severity distribution based on the filters above and the alert-status selector below.
             </p>
           </div>
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4 xl:grid-cols-7">
@@ -917,7 +978,7 @@ export default function AuditPage() {
             <div>
               <h2 className="text-xl font-bold">Audit Alerts</h2>
               <p className="mt-1 text-sm text-slate-400">
-                Automatically detected unusual score activity.
+Automatically detected unusual score activity. This list follows the shared audit filters above.
               </p>
             </div>
             <select
@@ -1014,7 +1075,7 @@ export default function AuditPage() {
                 href="/admin"
                 className="rounded-lg border border-slate-700 px-4 py-2 text-sm font-semibold hover:bg-slate-800"
               >
-                ← Admin
+                â† Admin
               </Link>
             </div>
           </div>
@@ -1096,7 +1157,7 @@ export default function AuditPage() {
                 className="text-slate-400 hover:text-white"
                 aria-label="Close audit details"
               >
-                ✕
+                âœ•
               </button>
             </div>
 
@@ -1303,7 +1364,7 @@ export default function AuditPage() {
                 onClick={() => setSelectedAlert(null)}
                 className="text-slate-400 hover:text-white"
               >
-                ✕
+                âœ•
               </button>
             </div>
 

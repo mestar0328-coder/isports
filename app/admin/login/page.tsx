@@ -1,11 +1,20 @@
-"use client";
+﻿"use client";
 
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 
 export default function AdminLoginPage() {
   const router = useRouter();
+  const [applicationNotice, setApplicationNotice] = useState("");
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("applicationSubmitted") === "1") {
+      setApplicationNotice("Your admin application was submitted. It is pending review; submission does not grant admin access.");
+    }
+  }, []);
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -28,6 +37,7 @@ export default function AdminLoginPage() {
       "isports_user",
       JSON.stringify({
         role: "admin",
+        adminRole: "super_admin",
         username,
       })
     );
@@ -39,7 +49,7 @@ export default function AdminLoginPage() {
     <main className="flex min-h-screen items-center justify-center bg-gray-950 px-4 text-white">
       <div className="w-full max-w-md rounded-2xl border border-gray-800 bg-gray-900 p-8 shadow-xl">
         <div className="text-center">
-          <div className="text-5xl">🛡️</div>
+          <div className="text-5xl">ðŸ›¡ï¸</div>
 
           <h1 className="mt-4 text-3xl font-bold">
             Admin Login
@@ -49,6 +59,12 @@ export default function AdminLoginPage() {
             Login to manage iSports events, registrations and scores.
           </p>
         </div>
+
+        {applicationNotice && (
+          <p role="status" className="mt-6 rounded-lg border border-blue-800 bg-blue-950/40 px-4 py-3 text-sm text-blue-200">
+            {applicationNotice}
+          </p>
+        )}
 
         <form onSubmit={handleLogin} className="mt-8 space-y-5">
           <div>
@@ -113,10 +129,19 @@ export default function AdminLoginPage() {
 
         <div className="mt-6 text-center">
           <Link
+            href="/admin/register"
+            className="text-sm font-semibold text-purple-300 transition hover:text-purple-200"
+          >
+            Apply for Admin Access
+          </Link>
+        </div>
+
+        <div className="mt-6 text-center">
+          <Link
             href="/"
             className="text-sm text-gray-400 transition hover:text-white"
           >
-            ← Back to Home
+            â† Back to Home
           </Link>
         </div>
       </div>

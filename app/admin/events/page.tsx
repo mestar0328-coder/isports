@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -12,10 +12,27 @@ export default function AdminEventsPage() {
   const router = useRouter();
 
   const [events, setEvents] = useState<SportEvent[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
     setEvents(getEvents());
   }, []);
+
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+
+  const filteredEvents = events.filter((event) => {
+    const searchableValues = [
+      event.name,
+      event.sport,
+      event.date,
+      event.venue,
+      event.registrationType,
+    ];
+
+    return searchableValues.some((value) =>
+      String(value ?? "").toLowerCase().includes(normalizedQuery)
+    );
+  });
 
   const handleDelete = (id: string) => {
     const confirmed = window.confirm(
@@ -61,6 +78,37 @@ export default function AdminEventsPage() {
           </div>
         </div>
 
+        <div className="mb-6">
+          <label htmlFor="event-search" className="mb-2 block text-sm font-semibold text-gray-300">
+            Search events
+          </label>
+
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <input
+              id="event-search"
+              type="search"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Search by event name, sport, date, venue or registration type..."
+              className="w-full rounded-lg border border-gray-700 bg-gray-900 px-4 py-3 text-white outline-none transition placeholder:text-gray-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+            />
+
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery("")}
+                className="rounded-lg border border-gray-700 px-5 py-3 font-semibold text-gray-300 transition hover:bg-gray-800"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+
+          <p className="mt-2 text-sm text-gray-500" aria-live="polite">
+            Showing {filteredEvents.length} of {events.length} events
+          </p>
+        </div>
+
         {events.length === 0 ? (
           <div className="rounded-xl border border-gray-800 bg-gray-900 p-10 text-center">
             <h2 className="text-xl font-semibold">
@@ -71,9 +119,19 @@ export default function AdminEventsPage() {
               Create your first sports event to see it here.
             </p>
           </div>
+        ) : filteredEvents.length === 0 ? (
+          <div className="rounded-xl border border-gray-800 bg-gray-900 p-10 text-center">
+            <h2 className="text-xl font-semibold">
+              No matching events
+            </h2>
+
+            <p className="mt-2 text-gray-400">
+              Try another event name, sport, date, venue or registration type.
+            </p>
+          </div>
         ) : (
           <div className="space-y-5">
-            {events.map((event) => (
+            {filteredEvents.map((event) => (
               <div
                 key={event.id}
                 className="flex flex-col justify-between gap-5 rounded-xl border border-gray-800 bg-gray-900 p-6 md:flex-row md:items-center"
@@ -88,7 +146,7 @@ export default function AdminEventsPage() {
                   </p>
 
                   <p className="mt-2 text-sm text-gray-400">
-                    {event.date} • {event.venue}
+                    {event.date} â€¢ {event.venue}
                   </p>
 
                   <p className="mt-1 text-sm text-gray-500">

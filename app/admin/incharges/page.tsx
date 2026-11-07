@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import {
   useEffect,
@@ -15,6 +15,7 @@ import {
 
 import { getEvents } from "@/data/eventsStorage";
 import type { SportEvent } from "@/types/events";
+import { addAdminActivityLog } from "@/data/adminActivityStorage";
 
 type InChargeAccount = {
   id: string;
@@ -27,6 +28,17 @@ type InChargeAccount = {
   isActive: boolean;
   createdAt: string;
 };
+
+function getAdminActor(): string {
+  try {
+    const raw = localStorage.getItem("isports_user");
+    if (!raw) return "admin";
+    const session = JSON.parse(raw) as { username?: string; email?: string };
+    return session.username || session.email || "admin";
+  } catch {
+    return "admin";
+  }
+}
 
 export default function InChargesPage() {
   const [accounts, setAccounts] =
@@ -132,6 +144,13 @@ export default function InChargesPage() {
     addInChargeAccount(
       newAccount
     );
+    addAdminActivityLog(
+      "In-Charge Created",
+      getAdminActor(),
+      newAccount.id,
+      newAccount.name,
+      `Created account ${newAccount.username} for ${newAccount.assignedSport}.`
+    );
 
     const updatedAccounts =
       getInChargeAccounts();
@@ -165,7 +184,17 @@ export default function InChargesPage() {
       return;
     }
 
+    const deletedAccount = accounts.find((item) => item.id === id);
     deleteInChargeAccount(id);
+    if (deletedAccount) {
+      addAdminActivityLog(
+        "In-Charge Deleted",
+        getAdminActor(),
+        deletedAccount.id,
+        deletedAccount.name,
+        `Deleted in-charge account ${deletedAccount.username}.`
+      );
+    }
 
     const updatedAccounts =
       getInChargeAccounts();
@@ -194,6 +223,13 @@ export default function InChargesPage() {
       {
         isActive: newStatus,
       }
+    );
+    addAdminActivityLog(
+      newStatus ? "Account Activated" : "Account Deactivated",
+      getAdminActor(),
+      account.id,
+      account.name,
+      `${account.username} account ${newStatus ? "activated" : "deactivated"}.`
     );
 
     const updatedAccounts =
@@ -245,12 +281,22 @@ export default function InChargesPage() {
     const eventIds =
       selectedEvents[account.id] || [];
 
+    const previousEventIds = account.assignedEventIds || [];
     updateInChargeAccount(
       account.id,
       {
         assignedEventIds:
           eventIds,
       }
+    );
+    const added = eventIds.filter((id) => !previousEventIds.includes(id));
+    const removed = previousEventIds.filter((id) => !eventIds.includes(id));
+    addAdminActivityLog(
+      "Events Assigned",
+      getAdminActor(),
+      account.id,
+      account.name,
+      `Assigned: ${added.map(getEventName).join(", ") || "None"}; removed: ${removed.map(getEventName).join(", ") || "None"}. Current assignment: ${eventIds.map(getEventName).join(", ") || "No events"}.`
     );
 
     const updatedAccounts =
@@ -557,9 +603,9 @@ export default function InChargesPage() {
 
                                     <p className="mt-1 text-sm text-gray-400">
                                       {event.sportId}{" "}
-                                      •{" "}
+                                      â€¢{" "}
                                       {event.venue}{" "}
-                                      •{" "}
+                                      â€¢{" "}
                                       {event.date}
                                     </p>
 

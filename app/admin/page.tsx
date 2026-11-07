@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -190,10 +190,31 @@ return (
         </button>
 
         <Link
+          href="/admin/roles"
+          className="rounded-lg border border-purple-500 px-5 py-3 font-semibold text-purple-300 hover:bg-purple-500/10"
+        >
+          Roles & Permissions
+        </Link>
+
+        <Link
+          href="/admin/applications"
+          className="rounded-lg bg-amber-600 px-5 py-3 font-semibold text-white hover:bg-amber-500"
+        >
+          Admin Applications
+        </Link>
+
+        <Link
           href="/admin/incharges"
           className="rounded-lg bg-purple-600 px-5 py-3 font-semibold text-white hover:bg-purple-500"
         >
           Manage Match In-Charges
+        </Link>
+
+        <Link
+          href="/admin/activity"
+          className="rounded-lg border border-purple-500 px-4 py-2 font-semibold text-purple-300 hover:bg-purple-500/10"
+        >
+          Admin Activity History
         </Link>
 
         <Link
