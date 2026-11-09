@@ -8,6 +8,8 @@ import {
   getSportScoringProfile,
 } from "@/lib/scoring/configuration";
 
+import { getScoringEngineById } from "@/lib/scoring/registry";
+
 import {
   addCustomSport,
   deleteCustomSport,
@@ -68,27 +70,24 @@ const SCORING_METHODS: {
   { value: "digital-match", label: "Digital match results", unit: "points", higherWins: true },
 ];
 
-const SCORING_ENGINES: {
-  value: SportScoringEngine;
-  label: string;
-}[] = [
-  { value: "goal-points", label: "Goal and Point Engine" },
-  { value: "rally-sets", label: "Rally and Set Engine" },
-  { value: "time-race", label: "Time and Race Engine" },
-  { value: "distance-height", label: "Distance and Height Engine" },
-  { value: "cricket", label: "Cricket Engine" },
-  { value: "inning-runs", label: "Inning Runs Engine" },
-  { value: "combat-points", label: "Combat Points Engine" },
-  { value: "judge-rounds", label: "Judge and Round Engine" },
-  { value: "judged-performance", label: "Judged Performance Engine" },
-  { value: "target-precision", label: "Target and Precision Engine" },
-  { value: "bowling", label: "Bowling Frame Engine" },
-  { value: "golf", label: "Golf Engine" },
-  { value: "strength-performance", label: "Strength and Performance Engine" },
-  { value: "multi-event", label: "Multi-Event Engine" },
-  { value: "digital-match", label: "Digital Match Engine" },
-  { value: "custom", label: "Custom Scoring Engine" },
-];
+const SCORING_ENGINE_LABELS: Record<SportScoringEngine, string> = {
+  "goal-points": "Goal and Point Engine",
+  "rally-sets": "Rally and Set Engine",
+  "time-race": "Time and Race Engine",
+  "distance-height": "Distance and Height Engine",
+  cricket: "Cricket Engine",
+  "inning-runs": "Inning Runs Engine",
+  "combat-points": "Combat Points Engine",
+  "judge-rounds": "Judge and Round Engine",
+  "judged-performance": "Judged Performance Engine",
+  "target-precision": "Target and Precision Engine",
+  bowling: "Bowling Frame Engine",
+  golf: "Golf Engine",
+  "strength-performance": "Strength and Performance Engine",
+  "multi-event": "Multi-Event Engine",
+  "digital-match": "Digital Match Engine",
+  custom: "Custom Scoring Engine",
+};
 
 /**
  * P2.1 centralized engine resolution.
@@ -99,13 +98,17 @@ const SCORING_ENGINES: {
  */
 function resolveSportEngine(
   method: SportScoringMethod,
-  sportName: string,
-  configuredEngine?: SportScoringEngine
+  sportName: string
 ): SportScoringEngine {
-  return (
-    configuredEngine ||
-    getScoringEngineForMethod(method, sportName)
-  );
+  const engine = getScoringEngineForMethod(method, sportName);
+
+  if (!engine || !getScoringEngineById(engine)) {
+    throw new Error(
+      `No supported scoring engine is configured for "${method}".`
+    );
+  }
+
+  return engine;
 }
 
 function createEmptySport(): Sport {
@@ -267,8 +270,7 @@ export default function AdminSportsPage() {
       scoringUnit: unit,
       scoringEngine: resolveSportEngine(
         form.scoringMethod,
-        name,
-        form.scoringEngine
+        name
       ),
       genderCategories: [...form.genderCategories],
       scoringConfig: form.scoringConfig || {},
@@ -309,8 +311,7 @@ export default function AdminSportsPage() {
       ...sport,
       scoringEngine: resolveSportEngine(
         sport.scoringMethod,
-        sport.name,
-        sport.scoringEngine
+        sport.name
       ),
       scoringConfig: sport.scoringConfig || {},
     });
@@ -372,14 +373,10 @@ export default function AdminSportsPage() {
 
   const selectedEngine = resolveSportEngine(
     form.scoringMethod,
-    form.name,
-    form.scoringEngine
+    form.name
   );
 
-  const selectedEngineLabel =
-    SCORING_ENGINES.find(
-      (engine) => engine.value === selectedEngine
-    )?.label || "Custom Scoring Engine";
+  const selectedEngineLabel = SCORING_ENGINE_LABELS[selectedEngine];
 
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-8 text-slate-900 sm:px-6 lg:px-8">
@@ -402,7 +399,7 @@ export default function AdminSportsPage() {
               { label: "Sports", value: allSports.length },
               { label: "Categories", value: CATEGORIES.length },
               { label: "Scoring Methods", value: SCORING_METHODS.length },
-              { label: "Scoring Engines", value: SCORING_ENGINES.length },
+              { label: "Scoring Engines", value: Object.keys(SCORING_ENGINE_LABELS).length },
             ].map((item) => (
               <div
                 key={item.label}
@@ -525,26 +522,13 @@ export default function AdminSportsPage() {
             </div>
 
             <div>
-              <label className={labelClass}>Scoring Engine *</label>
-              <select
-                value={selectedEngine}
-                onChange={(e) =>
-                  updateField(
-                    "scoringEngine",
-                    e.target.value as SportScoringEngine
-                  )
-                }
-                className={fieldClass}
-              >
-                {SCORING_ENGINES.map((engine) => (
-                  <option
-                    key={engine.value}
-                    value={engine.value}
-                  >
-                    {engine.label}
-                  </option>
-                ))}
-              </select>
+              <label className={labelClass}>Scoring Engine</label>
+              <div className={`${fieldClass} bg-slate-100 font-semibold`}>
+                {selectedEngineLabel}
+              </div>
+              <p className="mt-1 text-xs text-slate-500">
+                Automatically assigned from the selected scoring method.
+              </p>
             </div>
 
             <div>
@@ -707,13 +691,10 @@ export default function AdminSportsPage() {
 
                 const resolvedEngine = resolveSportEngine(
                   sport.scoringMethod,
-                  sport.name,
-                  sport.scoringEngine
+                  sport.name
                 );
 
-                const engine = SCORING_ENGINES.find(
-                  (item) => item.value === resolvedEngine
-                );
+                const engineLabel = SCORING_ENGINE_LABELS[resolvedEngine];
 
                 const category = CATEGORIES.find(
                   (item) => item.value === sport.category
@@ -754,9 +735,7 @@ export default function AdminSportsPage() {
 
                       <p>
                         <strong>Engine:</strong>{" "}
-                        {engine?.label ||
-                          sport.scoringEngine ||
-                          "Custom"}
+                        {engineLabel}
                       </p>
 
                       <p>

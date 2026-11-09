@@ -1,6 +1,6 @@
-"use client";
+﻿"use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 import {
@@ -71,6 +71,8 @@ export default function ResultsPage() {
     IndividualResult[]
   >([]);
   const [loading, setLoading] = useState(true);
+  const [selectedEventId, setSelectedEventId] = useState("All");
+  const [matchSearch, setMatchSearch] = useState("");
 
   useEffect(() => {
     let isMounted = true;
@@ -228,6 +230,57 @@ export default function ResultsPage() {
       .values()
   );
 
+  const eventOptions = useMemo(() => {
+    const options = new Map<string, string>();
+    teamResults.forEach((result) => {
+      const match = getMatches().find((item) => item.id === result.matchId);
+      if (match?.eventId) options.set(match.eventId, result.eventName);
+    });
+    individualResults.forEach((result) => {
+      options.set(result.eventId, result.eventName);
+    });
+    return Array.from(options.entries()).sort((a, b) =>
+      a[1].localeCompare(b[1])
+    );
+  }, [teamResults, individualResults]);
+
+  const filteredTeamResults = useMemo(() => {
+    const query = matchSearch.trim().toLowerCase();
+    return teamResults.filter((result) => {
+      const match = getMatches().find((item) => item.id === result.matchId);
+      const eventMatches =
+        selectedEventId === "All" || match?.eventId === selectedEventId;
+      const searchMatches =
+        !query ||
+        [result.matchId, result.eventName, result.teamA, result.teamB]
+          .join(" ")
+          .toLowerCase()
+          .includes(query);
+      return eventMatches && searchMatches;
+    });
+  }, [teamResults, selectedEventId, matchSearch]);
+
+  const filteredIndividualMatchGroups = useMemo(() => {
+    const query = matchSearch.trim().toLowerCase();
+    return individualMatchGroups.filter((group) => {
+      const eventMatches =
+        selectedEventId === "All" || group.eventId === selectedEventId;
+      const searchMatches =
+        !query ||
+        group.matchId.toLowerCase().includes(query) ||
+        group.results.some((result) =>
+          [result.athleteName, result.eventName]
+            .join(" ")
+            .toLowerCase()
+            .includes(query)
+        );
+      return eventMatches && searchMatches;
+    });
+  }, [individualMatchGroups, selectedEventId, matchSearch]);
+
+  const completedMatchCount =
+    filteredTeamResults.length + filteredIndividualMatchGroups.length;
+
   return (
     <main className="min-h-screen bg-[#080a0f] px-4 py-8 text-white sm:px-6 lg:px-8">
       <div className="mx-auto max-w-6xl">
@@ -253,6 +306,62 @@ export default function ResultsPage() {
           </div>
         ) : (
           <>
+            {/* COMPLETED MATCH FILTERS */}
+            <section className="mt-8 rounded-2xl border border-white/10 bg-gray-900/70 p-5 shadow-xl sm:p-6">
+              <div className="mb-4">
+                <p className="text-xs font-bold uppercase tracking-widest text-blue-400">
+                  Results Finder
+                </p>
+                <h2 className="mt-1 text-xl font-black">Filter Completed Matches</h2>
+                <p className="mt-1 text-sm text-gray-400">
+                  Select an event to view its submitted or locked matches only.
+                </p>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="text-sm font-semibold text-gray-300">
+                  Event Name
+                  <select
+                    value={selectedEventId}
+                    onChange={(event) => setSelectedEventId(event.target.value)}
+                    className="mt-2 w-full rounded-xl border border-white/10 bg-[#080a0f] px-4 py-3 text-white outline-none focus:border-blue-500"
+                  >
+                    <option value="All">All Events</option>
+                    {eventOptions.map(([eventId, eventName]) => (
+                      <option key={eventId} value={eventId}>{eventName}</option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="text-sm font-semibold text-gray-300">
+                  Search Match / Team / Athlete
+                  <input
+                    type="search"
+                    value={matchSearch}
+                    onChange={(event) => setMatchSearch(event.target.value)}
+                    placeholder="Enter match ID, team or athlete..."
+                    className="mt-2 w-full rounded-xl border border-white/10 bg-[#080a0f] px-4 py-3 text-white outline-none placeholder:text-gray-600 focus:border-blue-500"
+                  />
+                </label>
+              </div>
+
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                <p className="text-sm text-gray-400" aria-live="polite">
+                  Showing <span className="font-bold text-blue-300">{completedMatchCount}</span> completed matches
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedEventId("All");
+                    setMatchSearch("");
+                  }}
+                  className="rounded-lg border border-white/15 px-4 py-2 text-sm font-semibold text-gray-300 transition hover:bg-white/10"
+                >
+                  Clear Filters
+                </button>
+              </div>
+            </section>
+
             {/* TEAM RESULTS */}
 
             <section className="mt-8 rounded-2xl border border-white/10 bg-gray-900/70 p-5 shadow-xl sm:p-7">
@@ -268,17 +377,17 @@ export default function ResultsPage() {
                 </div>
 
                 <span className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs font-semibold text-gray-400">
-                  {teamResults.length} Results
+                  {filteredTeamResults.length} Results
                 </span>
               </div>
 
-              {teamResults.length === 0 ? (
+              {filteredTeamResults.length === 0 ? (
                 <p className="mt-6 rounded-xl border border-dashed border-white/10 p-8 text-center text-gray-500">
-                  No submitted team results yet.
+                  No completed team matches match the selected filters.
                 </p>
               ) : (
                 <div className="mt-6 grid gap-5 md:grid-cols-2">
-                  {teamResults.map((match) => {
+                  {filteredTeamResults.map((match) => {
                     const winner = getWinner(match);
 
                     return (
@@ -337,7 +446,7 @@ export default function ResultsPage() {
                             href={`/scoring/matches/${match.matchId}`}
                             className="inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-blue-600/10 px-5 py-3 text-sm font-bold text-blue-400 hover:bg-blue-600 hover:text-white"
                           >
-                            View Match →
+                            View Match â†’
                           </Link>
                         </div>
                       </article>
@@ -366,17 +475,17 @@ export default function ResultsPage() {
                 </div>
 
                 <span className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs font-semibold text-gray-400">
-                  {individualResults.length} Scores
+                  {filteredIndividualMatchGroups.reduce((total, group) => total + group.results.length, 0)} Scores
                 </span>
               </div>
 
-              {individualMatchGroups.length === 0 ? (
+              {filteredIndividualMatchGroups.length === 0 ? (
                 <p className="mt-6 rounded-xl border border-dashed border-white/10 p-8 text-center text-gray-500">
-                  No submitted individual results yet.
+                  No completed individual matches match the selected filters.
                 </p>
               ) : (
                 <div className="mt-6 space-y-6">
-                  {individualMatchGroups.map((group) => {
+                  {filteredIndividualMatchGroups.map((group) => {
                     // Detect time-based competitions.
                     const isTimeRace = detectTimeRace(group.results);
 
@@ -414,7 +523,7 @@ export default function ResultsPage() {
                             href={`/scoring/matches/${group.matchId}?eventId=${encodeURIComponent(group.eventId)}`}
                             className="rounded-lg border border-blue-500/30 px-3 py-2 text-xs font-bold text-blue-400 hover:bg-blue-600 hover:text-white"
                           >
-                            View Match →
+                            View Match â†’
                           </Link>
                         </div>
 
@@ -482,7 +591,7 @@ export default function ResultsPage() {
                                     <td className="px-5 py-4 font-black text-purple-300">
                                       {rank !== null
                                         ? `#${rank}`
-                                        : "—"}
+                                        : "â€”"}
                                     </td>
 
                                     <td className="px-5 py-4 font-bold text-gray-200">
@@ -495,8 +604,8 @@ export default function ResultsPage() {
                                           ? formatRaceTime(
                                               result.elapsedMilliseconds
                                             )
-                                          : "—"
-                                        : result.total ?? "—"}
+                                          : "â€”"
+                                        : result.total ?? "â€”"}
                                     </td>
 
                                     <td className="px-5 py-4">
@@ -579,14 +688,14 @@ export default function ResultsPage() {
             href="/scoring/matches"
             className="inline-flex min-h-11 items-center justify-center rounded-xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-bold text-gray-400 hover:bg-white/10 hover:text-white"
           >
-            ← Back to Match Management
+            â† Back to Match Management
           </Link>
 
           <Link
             href="/scoring/brackets"
             className="inline-flex min-h-11 items-center justify-center rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white hover:bg-blue-700"
           >
-            View Bracket →
+            View Bracket â†’
           </Link>
         </div>
       </div>

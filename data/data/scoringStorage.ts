@@ -145,23 +145,32 @@ throw new Error(
 }
 
 function savePendingOperation(
-operation: PendingScoreOperation
+  operation: PendingScoreOperation
 ): void {
-if (typeof window === "undefined") {
-throw new Error("Score recovery is only available in the browser.");
-}
+  if (typeof window === "undefined") {
+    throw new Error("Score recovery is only available in the browser.");
+  }
 
-try {
-localStorage.setItem(
-RECOVERY_KEY,
-JSON.stringify(operation)
-);
-} catch (error) {
-console.error("Unable to save score recovery journal:", error);
-throw new Error(
-"Unable to prepare score recovery. No score update was attempted."
-);
-}
+  // Never overwrite an operation that has not been recovered.
+  const existingOperation = readPendingOperation();
+
+  if (existingOperation) {
+    throw new Error(
+      "A previous score operation is still pending recovery. Please recover it before starting another operation."
+    );
+  }
+
+  try {
+    localStorage.setItem(
+      RECOVERY_KEY,
+      JSON.stringify(operation)
+    );
+  } catch (error) {
+    console.error("Unable to save score recovery journal:", error);
+    throw new Error(
+      "Unable to prepare score recovery. No score update was attempted."
+    );
+  }
 }
 
 function clearPendingOperation(): void {
@@ -180,7 +189,7 @@ throw new Error(
 /**
 
 * Replays an interrupted operation.
-* 
+*
 * The stable audit ID prevents duplicate central audit entries
 * if recovery runs more than once.
   */
@@ -508,17 +517,22 @@ const athlete = input.athleteId?.trim() || undefined;
 const scores = getAllScores();
 
 if (
-match &&
-athlete &&
-scores.some(
-(score) =>
-matchId(score) === match &&
-athleteId(score) === athlete
-)
+  match &&
+  scores.some(
+    (score) =>
+      matchId(score) === match &&
+      (
+        athlete
+          ? athleteId(score) === athlete
+          : !athleteId(score)
+      )
+  )
 ) {
-throw new Error(
-"A score record already exists for this athlete in this match."
-);
+  throw new Error(
+    athlete
+      ? "A score record already exists for this athlete in this match."
+      : "A team score record already exists for this match."
+  );
 }
 
 const now = new Date().toISOString();
@@ -577,6 +591,39 @@ actorId,
 actorName,
 });
 }
+
+// --------------------------------------------------
+// CREATE SCORE FOR MATCH
+
+export function createScoreForMatch(
+  event: SportEvent,
+  match: string,
+  actorId: string,
+  actorName: string
+): EventScoreRecord {
+  if (!match.trim()) {
+    throw new Error("A match ID is required.");
+  }
+
+  requireEvent(event.id);
+
+  const prepared = prepareEventScore(event, {
+    matchId: match,
+  });
+
+  return createScore({
+    eventId: prepared.eventId,
+    matchId: prepared.matchId,
+    sportId: prepared.sportId,
+    scoringEngine: prepared.scoringEngine,
+    data: prepared.data,
+    actorId,
+    actorName,
+  });
+}
+
+// --------------------------------------------------
+// CREATE SCORE FOR MATCH
 
 // --------------------------------------------------
 // CREATE SCORE FOR MATCH AND ATHLETE

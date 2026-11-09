@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { getInChargeAccounts } from "@/data/inchargeStorage";
 import { getEvents } from "@/data/eventsStorage";
 import { getScoresByEvent } from "@/data/data/scoringStorage";
+import { getScores as getLegacyScores } from "@/data/scoreStorage";
+import { getMatches } from "@/data/matchStorage";
 
 import type { SportEvent } from "@/types/events";
 
@@ -37,6 +39,8 @@ export default function InChargeDashboardPage() {
 const router = useRouter();
 const [user, setUser] = useState<InChargeUser | null>(null);
 const [assignedEvents, setAssignedEvents] = useState<SportEvent[]>([]);
+const [eventSearch, setEventSearch] = useState("");
+const [sportFilter, setSportFilter] = useState("All Sports");
 const [scoreSummaries, setScoreSummaries] = useState<
   Record<string, EventScoreSummary>
 >({});
@@ -46,18 +50,58 @@ const refreshScoreSummaries = useCallback(
   (events: SportEvent[]) => {
 const summaries: Record<string, EventScoreSummary> = {};
 
+  // Modern sport-specific scores are stored by event ID.
+  // Legacy team/custom scores are stored by match ID; map them to
+  // their event through the saved match records before counting.
+  const allMatches = getMatches();
+  const legacyScores = getLegacyScores();
+
   events.forEach((event) => {
-    const scores = getScoresByEvent(event.id);
+    const modernScores = getScoresByEvent(event.id);
+    const eventMatchIds = new Set(
+      allMatches
+        .filter((match) => match.eventId === event.id)
+        .map((match) => match.id)
+    );
+    const eventLegacyScores = legacyScores.filter((score) =>
+      eventMatchIds.has(score.matchId)
+    );
 
     summaries[event.id] = {
-      total: scores.length,
-      draft: scores.filter((score) => score.status === "draft").length,
-      submitted: scores.filter((score) => score.status === "submitted").length,
-      locked: scores.filter((score) => score.status === "locked").length,
+      total: modernScores.length + eventLegacyScores.length,
+      draft:
+        modernScores.filter((score) => score.status === "draft").length +
+        eventLegacyScores.filter((score) => score.status === "Draft").length,
+      submitted:
+        modernScores.filter((score) => score.status === "submitted").length +
+        eventLegacyScores.filter((score) => score.status === "Submitted").length,
+      locked:
+        modernScores.filter((score) => score.status === "locked").length +
+        eventLegacyScores.filter((score) => score.status === "Locked").length,
     };
   });
 
-  setScoreSummaries(summaries);
+  setScoreSummaries((previous) => {
+    const previousKeys = Object.keys(previous);
+    const nextKeys = Object.keys(summaries);
+
+    const hasChanged =
+      previousKeys.length !== nextKeys.length ||
+      nextKeys.some((eventId) => {
+        const oldSummary = previous[eventId];
+        const newSummary = summaries[eventId];
+
+        return (
+          !oldSummary ||
+          oldSummary.total !== newSummary.total ||
+          oldSummary.draft !== newSummary.draft ||
+          oldSummary.submitted !== newSummary.submitted ||
+          oldSummary.locked !== newSummary.locked
+        );
+      });
+
+    return hasChanged ? summaries : previous;
+  });
   setLastUpdated(new Date());
 },
 []
@@ -125,8 +169,9 @@ try {
 
 }, [router, refreshScoreSummaries]);
 
-// Refresh score information periodically and when another tab
-// changes the event score storage.
+// Keep scoring totals current while the dashboard is open.
+// Poll every second as a fallback, and refresh immediately when
+// another tab updates score storage or this tab becomes active.
 useEffect(() => {
 if (!user) return;
 
@@ -134,25 +179,70 @@ const refresh = () => {
   refreshScoreSummaries(assignedEvents);
 };
 
-const interval = window.setInterval(refresh, 5000);
+const interval = window.setInterval(refresh, 1000);
 
 const handleStorageChange = (event: StorageEvent) => {
   if (
+    event.key === null ||
     event.key === "isports_event_scores" ||
-    event.key === "isports_score_recovery"
+    event.key === "isports_score_recovery" ||
+    event.key === "isports_scores"
   ) {
     refresh();
   }
 };
 
+const handlePageActive = () => {
+  if (document.visibilityState === "visible") {
+    refresh();
+  }
+};
+
 window.addEventListener("storage", handleStorageChange);
+window.addEventListener("focus", refresh);
+document.addEventListener("visibilitychange", handlePageActive);
 
 return () => {
   window.clearInterval(interval);
   window.removeEventListener("storage", handleStorageChange);
+  window.removeEventListener("focus", refresh);
+  document.removeEventListener("visibilitychange", handlePageActive);
 };
 
 }, [user, assignedEvents, refreshScoreSummaries]);
+
+const availableSports = Array.from(
+  new Set(
+    assignedEvents
+      .map((event) => event.sportId)
+      .filter((sportId): sportId is string => Boolean(sportId))
+  )
+).sort((a, b) => a.localeCompare(b));
+
+const normalizedSearch = eventSearch.trim().toLowerCase();
+
+const filteredAssignedEvents = assignedEvents.filter((event) => {
+  const matchesSearch =
+    !normalizedSearch ||
+    [
+      event.name,
+      event.sportId,
+      event.venue,
+      event.date,
+    ].some((value) =>
+      String(value ?? "").toLowerCase().includes(normalizedSearch)
+    );
+
+  const matchesSport =
+    sportFilter === "All Sports" || event.sportId === sportFilter;
+
+  return matchesSearch && matchesSport;
+});
+
+function clearEventFilters() {
+  setEventSearch("");
+  setSportFilter("All Sports");
+}
 
 function handleLogout() {
 localStorage.removeItem("isports_user");
@@ -218,7 +308,7 @@ Match In-Charge Dashboard
 
         <div className="text-xs text-gray-500">
           {lastUpdated
-            ? `Updated: ${lastUpdated.toLocaleTimeString()}`
+            ? `Last checked: ${lastUpdated.toLocaleTimeString()}`
             : "Loading score information..."}
         </div>
       </div>
@@ -230,8 +320,55 @@ Match In-Charge Dashboard
           </p>
         </div>
       ) : (
-        <div className="mt-6 space-y-4">
-          {assignedEvents.map((event) => {
+        <>
+          <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_220px_auto]">
+            <input
+              type="search"
+              value={eventSearch}
+              onChange={(event) => setEventSearch(event.target.value)}
+              placeholder="Search event, sport, venue or date..."
+              aria-label="Search assigned events"
+              className="w-full rounded-lg border border-gray-700 bg-gray-950 px-4 py-3 text-sm text-white outline-none placeholder:text-gray-500 focus:border-blue-500"
+            />
+
+            <select
+              value={sportFilter}
+              onChange={(event) => setSportFilter(event.target.value)}
+              aria-label="Filter assigned events by sport"
+              className="w-full rounded-lg border border-gray-700 bg-gray-950 px-4 py-3 text-sm text-white outline-none focus:border-blue-500"
+            >
+              <option value="All Sports">All Sports</option>
+              {availableSports.map((sport) => (
+                <option key={sport} value={sport}>
+                  {sport}
+                </option>
+              ))}
+            </select>
+
+            <button
+              type="button"
+              onClick={clearEventFilters}
+              disabled={!eventSearch && sportFilter === "All Sports"}
+              className="rounded-lg border border-gray-600 px-4 py-3 text-sm font-semibold text-gray-200 hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Clear Filters
+            </button>
+          </div>
+
+          <p className="mt-3 text-sm text-gray-400">
+            Showing {filteredAssignedEvents.length} of {assignedEvents.length} assigned events
+          </p>
+
+          {filteredAssignedEvents.length === 0 ? (
+            <div className="mt-4 rounded-lg border border-dashed border-gray-700 bg-gray-950 p-6 text-center">
+              <p className="text-gray-300">No assigned events match your filters.</p>
+              <p className="mt-1 text-sm text-gray-500">
+                Try another search term or clear the filters.
+              </p>
+            </div>
+          ) : (
+            <div className="mt-4 space-y-4">
+              {filteredAssignedEvents.map((event) => {
             const summary =
               scoreSummaries[event.id] ?? emptySummary();
 
@@ -307,8 +444,10 @@ Match In-Charge Dashboard
                 </div>
               </div>
             );
-          })}
-        </div>
+              })}
+            </div>
+          )}
+        </>
       )}
     </section>
   </div>

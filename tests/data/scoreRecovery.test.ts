@@ -8,14 +8,14 @@ import {
 } from "vitest";
 
 import {
+  getAllScores,
+} from "@/data/data/scoringStorage";
+
+import {
   addScoreAuditWithId,
   clearScoreAudit,
   getScoreAudit,
 } from "@/data/scoreAudit";
-
-import {
-  getAllScores,
-} from "@/data/data/scoringStorage";
 
 const SCORE_KEY = "isports_event_scores";
 const AUDIT_KEY = "isports_score_audit";
@@ -205,6 +205,48 @@ describe("Score recovery journal", () => {
     expect(storage.getItem(SCORE_KEY)).toBe("[]");
   });
 
+  it("preserves the complete score snapshot and change details during recovery", () => {
+    const scoreSnapshot = {
+      athleteId: "athlete-1",
+      elapsedMilliseconds: 10500,
+      status: "submitted",
+    };
+
+    const previousValue = {
+      elapsedMilliseconds: 12500,
+    };
+
+    const newValue = {
+      elapsedMilliseconds: 10500,
+    };
+
+    preparePendingOperation({
+      details: {
+        eventId: "event-1",
+        scoreRecordId: "score-1",
+        actorId: "user-1",
+        status: "submitted",
+        scoreData: scoreSnapshot,
+        previousValue,
+        newValue,
+        reason: "Timing correction",
+      },
+    });
+
+    getAllScores();
+
+    const audit = getScoreAudit();
+
+    expect(audit).toHaveLength(1);
+    expect(audit[0].scoreData).toEqual(scoreSnapshot);
+    expect(audit[0].previousValue).toEqual(previousValue);
+    expect(audit[0].newValue).toEqual(newValue);
+    expect(audit[0].reason).toBe("Timing correction");
+    expect(audit[0].status).toBe("submitted");
+
+    expect(storage.getItem(RECOVERY_KEY)).toBeNull();
+  });
+
   it("does not duplicate the audit entry when recovery is repeated", () => {
     preparePendingOperation();
 
@@ -232,6 +274,27 @@ describe("Score recovery journal", () => {
 
     expect(getScoreAudit()).toHaveLength(1);
     expect(storage.getItem(RECOVERY_KEY)).toBeNull();
+  });
+
+  it("preserves the recovery journal if score storage fails", () => {
+    preparePendingOperation();
+
+    storage.failOn(SCORE_KEY);
+
+    expect(() => getAllScores()).toThrow(
+      "Unable to save scores in browser storage."
+    );
+
+    expect(storage.getItem(RECOVERY_KEY)).not.toBeNull();
+    expect(storage.getItem(AUDIT_KEY)).toBeNull();
+
+    storage.failOn(null);
+
+    getAllScores();
+
+    expect(getScoreAudit()).toHaveLength(1);
+    expect(storage.getItem(RECOVERY_KEY)).toBeNull();
+    expect(storage.getItem(SCORE_KEY)).toBe("[]");
   });
 
   it("pauses scoring when the recovery journal is damaged", () => {

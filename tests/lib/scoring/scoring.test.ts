@@ -9,7 +9,10 @@ import {
   getScoringEngineName,
 } from "@/lib/scoring/registry";
 
-import { resolveScoringEngine } from "@/lib/scoring/resolveEngine";
+import {
+  resolveScoringEngine,
+  ScoringConfigurationError,
+} from "@/lib/scoring/resolveEngine";
 
 import {
   isTimeRace,
@@ -79,17 +82,17 @@ describe("Scoring engine registry", () => {
 });
 
 describe("Scoring engine resolution", () => {
-  it("prioritizes an explicitly configured engine", () => {
+  it("prioritizes the scoring method over a stale saved engine", () => {
     const event = {
       sport: "Football",
       scoringEngine: "cricket",
       scoringMethod: "points",
     } as EngineEvent;
 
-    expect(resolveScoringEngine(event)).toBe("cricket");
+    expect(resolveScoringEngine(event)).toBe("goal-points");
   });
 
-  it("uses the scoring method when no engine is configured", () => {
+  it("resolves a supported method for a custom sport", () => {
     const event = {
       sport: "Unknown Sport",
       scoringEngine: undefined,
@@ -109,7 +112,17 @@ describe("Scoring engine resolution", () => {
     expect(resolveScoringEngine(event)).toBe("cricket");
   });
 
-  it("falls back to the registered sport engine", () => {
+  it("uses the selected method when a sport has a different default", () => {
+    const event = {
+      sport: "Badminton",
+      scoringEngine: "goal-points",
+      scoringMethod: "time",
+    } as EngineEvent;
+
+    expect(resolveScoringEngine(event)).toBe("time-race");
+  });
+
+  it("uses the registered sport profile for a legacy event without a method", () => {
     const event = {
       sport: "Badminton",
       scoringEngine: undefined,
@@ -119,14 +132,42 @@ describe("Scoring engine resolution", () => {
     expect(resolveScoringEngine(event)).toBe("rally-sets");
   });
 
-  it("uses custom scoring for an unsupported sport", () => {
+  it("uses custom scoring when manual scoring is explicitly selected", () => {
+    const event = {
+      sport: "Unknown Sport",
+      scoringEngine: undefined,
+      scoringMethod: "manual",
+    } as EngineEvent;
+
+    expect(resolveScoringEngine(event)).toBe("custom");
+  });
+
+  it("does not silently use custom scoring for an unknown sport", () => {
     const event = {
       sport: "Unknown Sport",
       scoringEngine: undefined,
       scoringMethod: undefined,
     } as EngineEvent;
 
-    expect(resolveScoringEngine(event)).toBe("custom");
+    expect(() => resolveScoringEngine(event)).toThrow(
+      ScoringConfigurationError
+    );
+
+    expect(() => resolveScoringEngine(event)).toThrow(
+      /No scoring method is configured/
+    );
+  });
+
+  it("rejects an unsupported runtime scoring method", () => {
+    const event = {
+      sport: "Football",
+      scoringEngine: "goal-points",
+      scoringMethod: "unsupported-method",
+    } as unknown as EngineEvent;
+
+    expect(() => resolveScoringEngine(event)).toThrow(
+      ScoringConfigurationError
+    );
   });
 });
 
@@ -177,7 +218,11 @@ describe("Result ranking", () => {
 
   it("ranks lower scores first when lower scores win", () => {
     expect(
-      compareResults(result(40, null, false), result(50, null, false), false)
+      compareResults(
+        result(40, null, false),
+        result(50, null, false),
+        false
+      )
     ).toBeLessThan(0);
   });
 

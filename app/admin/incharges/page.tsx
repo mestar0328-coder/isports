@@ -1,21 +1,21 @@
-"use client";
-
+﻿"use client";
+ 
 import {
   useEffect,
   useState,
 } from "react";
 import Link from "next/link";
-
+ 
 import {
   addInChargeAccount,
   deleteInChargeAccount,
   getInChargeAccounts,
   updateInChargeAccount,
 } from "@/data/inchargeStorage";
-
+ 
 import { getEvents } from "@/data/eventsStorage";
 import type { SportEvent } from "@/types/events";
-
+ 
 type InChargeAccount = {
   id: string;
   name: string;
@@ -27,14 +27,19 @@ type InChargeAccount = {
   isActive: boolean;
   createdAt: string;
 };
-
+ 
 export default function InChargesPage() {
   const [accounts, setAccounts] =
     useState<InChargeAccount[]>([]);
+ 
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sportFilter, setSportFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [eventFilter, setEventFilter] = useState("all");
 
   const [events, setEvents] =
     useState<SportEvent[]>([]);
-
+ 
   const [name, setName] = useState("");
   const [username, setUsername] =
     useState("");
@@ -44,38 +49,38 @@ export default function InChargesPage() {
     useState("");
   const [expiresAt, setExpiresAt] =
     useState("");
-
+ 
   const [selectedEvents, setSelectedEvents] =
     useState<Record<string, string[]>>({});
-
+ 
   useEffect(() => {
     const loadedAccounts =
       getInChargeAccounts();
-
+ 
     const loadedEvents =
       getEvents();
-
+ 
     setAccounts(loadedAccounts);
     setEvents(loadedEvents);
-
+ 
     const initialSelections:
       Record<string, string[]> = {};
-
+ 
     loadedAccounts.forEach((account) => {
       initialSelections[account.id] =
         account.assignedEventIds || [];
     });
-
+ 
     setSelectedEvents(
       initialSelections
     );
   }, []);
-
+ 
   function handleCreateAccount(
     event: React.FormEvent<HTMLFormElement>
   ) {
     event.preventDefault();
-
+ 
     if (
       !name.trim() ||
       !username.trim() ||
@@ -86,34 +91,34 @@ export default function InChargesPage() {
       alert("Please fill in all fields.");
       return;
     }
-
+ 
     const normalizedUsername =
       username.trim().toLowerCase();
-
+ 
     const usernameExists = accounts.some(
       (account) =>
         account.username.trim().toLowerCase() ===
         normalizedUsername
     );
-
+ 
     if (usernameExists) {
       alert(
         "This username already exists. Please choose another username."
       );
       return;
     }
-
+ 
     const expiryDate = new Date(
       `${expiresAt}T23:59:59`
     );
-
+ 
     if (expiryDate.getTime() < Date.now()) {
       alert(
         "Expiry date must be today or a future date."
       );
       return;
     }
-
+ 
     const newAccount: InChargeAccount = {
       id: crypto.randomUUID(),
       name: name.trim(),
@@ -128,86 +133,86 @@ export default function InChargesPage() {
       createdAt:
         new Date().toISOString(),
     };
-
+ 
     addInChargeAccount(
       newAccount
     );
-
+ 
     const updatedAccounts =
       getInChargeAccounts();
-
+ 
     setAccounts(updatedAccounts);
-
+ 
     setSelectedEvents((current) => ({
       ...current,
       [newAccount.id]: [],
     }));
-
+ 
     setName("");
     setUsername("");
     setPassword("");
     setAssignedSport("");
     setExpiresAt("");
-
+ 
     alert(
       "Match In-Charge account created successfully."
     );
   }
-
+ 
   function handleDeleteAccount(
     id: string
   ) {
     const confirmed = confirm(
       "Are you sure you want to delete this account?"
     );
-
+ 
     if (!confirmed) {
       return;
     }
-
+ 
     deleteInChargeAccount(id);
-
+ 
     const updatedAccounts =
       getInChargeAccounts();
-
+ 
     setAccounts(updatedAccounts);
-
+ 
     setSelectedEvents((current) => {
       const updated = {
         ...current,
       };
-
+ 
       delete updated[id];
-
+ 
       return updated;
     });
   }
-
+ 
   function handleToggleAccount(
     account: InChargeAccount
   ) {
     const newStatus =
       !account.isActive;
-
+ 
     updateInChargeAccount(
       account.id,
       {
         isActive: newStatus,
       }
     );
-
+ 
     const updatedAccounts =
       getInChargeAccounts();
-
+ 
     setAccounts(updatedAccounts);
-
+ 
     alert(
       newStatus
         ? `${account.name} account activated.`
         : `${account.name} account deactivated.`
     );
   }
-
+ 
   function handleEventToggle(
     accountId: string,
     eventId: string
@@ -215,12 +220,12 @@ export default function InChargesPage() {
     setSelectedEvents((current) => {
       const currentEvents =
         current[accountId] || [];
-
+ 
       const alreadySelected =
         currentEvents.includes(
           eventId
         );
-
+ 
       const updatedEvents =
         alreadySelected
           ? currentEvents.filter(
@@ -230,7 +235,7 @@ export default function InChargesPage() {
               ...currentEvents,
               eventId,
             ];
-
+ 
       return {
         ...current,
         [accountId]:
@@ -238,13 +243,13 @@ export default function InChargesPage() {
       };
     });
   }
-
+ 
   function handleSaveAssignment(
     account: InChargeAccount
   ) {
     const eventIds =
       selectedEvents[account.id] || [];
-
+ 
     updateInChargeAccount(
       account.id,
       {
@@ -252,17 +257,17 @@ export default function InChargesPage() {
           eventIds,
       }
     );
-
+ 
     const updatedAccounts =
       getInChargeAccounts();
-
+ 
     setAccounts(updatedAccounts);
-
+ 
     alert(
       `Events assigned successfully to ${account.name}.`
     );
   }
-
+ 
   function getEventName(
     eventId: string
   ) {
@@ -270,52 +275,102 @@ export default function InChargesPage() {
       (item) =>
         item.id === eventId
     );
-
+ 
     return (
       event?.name || eventId
     );
   }
-
+ 
+  const normalizedSearch = searchQuery.trim().toLowerCase();
+ 
+  const availableSports = Array.from(
+    new Set(
+      accounts
+        .map((account) => account.assignedSport.trim())
+        .filter(Boolean)
+    )
+  ).sort((a, b) => a.localeCompare(b));
+ 
+  const filteredAccounts = accounts.filter((account) => {
+    const assignedEventIds = account.assignedEventIds || [];
+    const assignedEventNames = assignedEventIds
+      .map((eventId) => getEventName(eventId))
+      .join(" ");
+ 
+    const searchableText = [
+      account.name,
+      account.username,
+      account.assignedSport,
+      account.isActive ? "active" : "inactive",
+      assignedEventNames,
+    ].join(" ").toLowerCase();
+ 
+    const matchesSearch = searchableText.includes(normalizedSearch);
+    const matchesSport =
+      sportFilter === "all" || account.assignedSport === sportFilter;
+    const matchesStatus =
+      statusFilter === "all" ||
+      (statusFilter === "active" && account.isActive) ||
+      (statusFilter === "inactive" && !account.isActive);
+    const matchesEvent =
+      eventFilter === "all" || assignedEventIds.includes(eventFilter);
+ 
+    return matchesSearch && matchesSport && matchesStatus && matchesEvent;
+  });
+ 
+  const hasActiveFilters =
+    searchQuery.trim() !== "" ||
+    sportFilter !== "all" ||
+    statusFilter !== "all" ||
+    eventFilter !== "all";
+ 
+  function clearFilters() {
+    setSearchQuery("");
+    setSportFilter("all");
+    setStatusFilter("all");
+    setEventFilter("all");
+  }
+ 
   return (
     <main className="min-h-screen bg-gray-950 px-6 py-10 text-white">
       <div className="mx-auto max-w-6xl">
-
+ 
         {/* HEADER */}
-
+ 
         <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
-
+ 
           <div>
             <h1 className="text-3xl font-bold">
               Manage Match In-Charges
             </h1>
-
+ 
             <p className="mt-2 text-gray-400">
               Create accounts and assign specific events to each Match In-Charge.
             </p>
           </div>
-
+ 
           <Link
             href="/admin"
             className="rounded-lg bg-gray-700 px-4 py-2 font-semibold transition hover:bg-gray-600"
           >
             Back to Admin
           </Link>
-
+ 
         </div>
-
+ 
         {/* CREATE ACCOUNT */}
-
+ 
         <section className="mb-10 rounded-xl border border-gray-800 bg-gray-900 p-6">
-
+ 
           <h2 className="mb-5 text-xl font-semibold">
             Create Temporary Account
           </h2>
-
+ 
           <form
             onSubmit={handleCreateAccount}
             className="grid gap-4 md:grid-cols-2"
           >
-
+ 
             <input
               value={name}
               onChange={(event) =>
@@ -326,7 +381,7 @@ export default function InChargesPage() {
               placeholder="Full name"
               className="rounded-lg bg-gray-800 px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
             />
-
+ 
             <input
               value={username}
               onChange={(event) =>
@@ -337,7 +392,7 @@ export default function InChargesPage() {
               placeholder="Username"
               className="rounded-lg bg-gray-800 px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
             />
-
+ 
             <input
               type="password"
               value={password}
@@ -349,7 +404,7 @@ export default function InChargesPage() {
               placeholder="Temporary password"
               className="rounded-lg bg-gray-800 px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
             />
-
+ 
             <input
               value={assignedSport}
               onChange={(event) =>
@@ -360,12 +415,12 @@ export default function InChargesPage() {
               placeholder="Assigned sport, e.g. Basketball"
               className="rounded-lg bg-gray-800 px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
             />
-
+ 
             <div>
               <label className="mb-2 block text-sm text-gray-400">
                 Account expiry date
               </label>
-
+ 
               <input
                 type="date"
                 value={expiresAt}
@@ -377,70 +432,165 @@ export default function InChargesPage() {
                 className="w-full rounded-lg bg-gray-800 px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
-
+ 
             <button
               type="submit"
               className="rounded-lg bg-blue-600 px-4 py-3 font-semibold transition hover:bg-blue-500"
             >
               Create Account
             </button>
-
+ 
           </form>
-
+ 
         </section>
-
+ 
         {/* EXISTING ACCOUNTS */}
-
+ 
         <section className="rounded-xl border border-gray-800 bg-gray-900 p-6">
-
+ 
           <h2 className="mb-5 text-xl font-semibold">
             Existing In-Charge Accounts
           </h2>
-
+ 
+          <div className="mb-5">
+            <label
+              htmlFor="incharge-search"
+              className="mb-2 block text-sm font-semibold text-gray-300"
+            >
+              Search In-Charge Candidates
+            </label>
+ 
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <input
+                id="incharge-search"
+                type="search"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Search by name, username, sport, assigned event or account status..."
+                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-3 text-white outline-none transition placeholder:text-gray-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+              />
+ 
+              {hasActiveFilters && (
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="rounded-lg border border-gray-700 px-5 py-3 font-semibold text-gray-300 transition hover:bg-gray-700"
+                >
+                  Clear Filters
+                </button>
+              )}
+            </div>
+ 
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              <div>
+                <label htmlFor="incharge-sport-filter" className="mb-2 block text-sm font-medium text-gray-300">
+                  Filter by Sport
+                </label>
+                <select
+                  id="incharge-sport-filter"
+                  value={sportFilter}
+                  onChange={(event) => setSportFilter(event.target.value)}
+                  className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-3 text-white outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+                >
+                  <option value="all">All Sports</option>
+                  {availableSports.map((sport) => (
+                    <option key={sport} value={sport}>{sport}</option>
+                  ))}
+                </select>
+              </div>
+ 
+              <div>
+                <label htmlFor="incharge-status-filter" className="mb-2 block text-sm font-medium text-gray-300">
+                  Filter by Status
+                </label>
+                <select
+                  id="incharge-status-filter"
+                  value={statusFilter}
+                  onChange={(event) => setStatusFilter(event.target.value)}
+                  className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-3 text-white outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+                >
+                  <option value="all">All Statuses</option>
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+              </div>
+ 
+              <div>
+                <label htmlFor="incharge-event-filter" className="mb-2 block text-sm font-medium text-gray-300">
+                  Filter by Assigned Event
+                </label>
+                <select
+                  id="incharge-event-filter"
+                  value={eventFilter}
+                  onChange={(event) => setEventFilter(event.target.value)}
+                  className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-3 text-white outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+                >
+                  <option value="all">All Assigned Events</option>
+                  {events.map((event) => (
+                    <option key={event.id} value={event.id}>{event.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+ 
+            <p className="mt-3 text-sm text-gray-500" aria-live="polite">
+              Showing {filteredAccounts.length} of {accounts.length} In-Charge accounts
+            </p>
+          </div>
+ 
           {accounts.length === 0 ? (
             <p className="text-gray-400">
               No match in-charge accounts created yet.
             </p>
+          ) : filteredAccounts.length === 0 ? (
+            <div className="rounded-lg border border-gray-700 bg-gray-800 p-6 text-center">
+              <p className="font-semibold text-gray-200">
+                No matching In-Charge candidates found.
+              </p>
+              <p className="mt-2 text-sm text-gray-400">
+                Try a different name, username, sport, assigned event or status.
+              </p>
+            </div>
           ) : (
             <div className="space-y-6">
-
-              {accounts.map(
+ 
+              {filteredAccounts.map(
                 (account) => (
                   <div
                     key={account.id}
                     className="rounded-xl border border-gray-700 bg-gray-800 p-5"
                   >
-
+ 
                     {/* ACCOUNT INFORMATION */}
-
+ 
                     <div className="flex flex-wrap items-start justify-between gap-4">
-
+ 
                       <div>
-
+ 
                         <h3 className="text-lg font-semibold">
                           {account.name}
                         </h3>
-
+ 
                         <p className="text-sm text-gray-300">
                           Username:{" "}
                           {account.username}
                         </p>
-
+ 
                         <p className="text-sm text-yellow-300">
                           Password:{" "}
                           {account.password}
                         </p>
-
+ 
                         <p className="text-sm text-gray-300">
                           Sport:{" "}
                           {account.assignedSport}
                         </p>
-
+ 
                         <p className="text-sm text-gray-300">
                           Expires:{" "}
                           {account.expiresAt}
                         </p>
-
+ 
                         <span
                           className={`mt-2 inline-block rounded-full px-3 py-1 text-xs font-semibold ${
                             account.isActive
@@ -452,13 +602,13 @@ export default function InChargesPage() {
                             ? "Active"
                             : "Inactive"}
                         </span>
-
+ 
                       </div>
-
+ 
                       {/* ACCOUNT ACTIONS */}
-
+ 
                       <div className="flex flex-wrap gap-2">
-
+ 
                         <button
                           type="button"
                           onClick={() =>
@@ -476,7 +626,7 @@ export default function InChargesPage() {
                             ? "Deactivate"
                             : "Activate"}
                         </button>
-
+ 
                         <button
                           type="button"
                           onClick={() =>
@@ -488,34 +638,34 @@ export default function InChargesPage() {
                         >
                           Delete
                         </button>
-
+ 
                       </div>
-
+ 
                     </div>
-
+ 
                     {/* EVENT ASSIGNMENT */}
-
+ 
                     <div className="mt-6 border-t border-gray-700 pt-5">
-
+ 
                       <h4 className="text-base font-semibold">
                         Assign Events
                       </h4>
-
+ 
                       <p className="mt-1 text-sm text-gray-400">
                         Select the events this Match In-Charge is allowed to manage.
                       </p>
-
+ 
                       {events.length === 0 ? (
                         <div className="mt-4 rounded-lg border border-dashed border-gray-700 bg-gray-900 p-4">
-
+ 
                           <p className="text-sm text-gray-400">
                             No events available to assign.
                           </p>
-
+ 
                         </div>
                       ) : (
                         <div className="mt-4 space-y-3">
-
+ 
                           {events.map(
                             (event) => {
                               const isSelected =
@@ -526,7 +676,7 @@ export default function InChargesPage() {
                                 ).includes(
                                   event.id
                                 );
-
+ 
                               return (
                                 <label
                                   key={
@@ -534,7 +684,7 @@ export default function InChargesPage() {
                                   }
                                   className="flex cursor-pointer items-start gap-3 rounded-lg border border-gray-700 bg-gray-900 p-4 transition hover:border-blue-600"
                                 >
-
+ 
                                   <input
                                     type="checkbox"
                                     checked={
@@ -548,13 +698,13 @@ export default function InChargesPage() {
                                     }
                                     className="mt-1 h-4 w-4 accent-blue-600"
                                   />
-
+ 
                                   <div>
-
+ 
                                     <p className="font-semibold text-gray-100">
                                       {event.name}
                                     </p>
-
+ 
                                     <p className="mt-1 text-sm text-gray-400">
                                       {event.sportId}{" "}
                                       •{" "}
@@ -562,19 +712,19 @@ export default function InChargesPage() {
                                       •{" "}
                                       {event.date}
                                     </p>
-
+ 
                                   </div>
-
+ 
                                 </label>
                               );
                             }
                           )}
-
+ 
                         </div>
                       )}
-
+ 
                       {/* SAVE ASSIGNMENT */}
-
+ 
                       <button
                         type="button"
                         onClick={() =>
@@ -586,15 +736,15 @@ export default function InChargesPage() {
                       >
                         Save Event Assignment
                       </button>
-
+ 
                       {/* CURRENT ASSIGNMENTS */}
-
+ 
                       <div className="mt-5">
-
+ 
                         <p className="text-sm font-semibold text-gray-300">
                           Currently Assigned:
                         </p>
-
+ 
                         {(
                           selectedEvents[
                             account.id
@@ -605,7 +755,7 @@ export default function InChargesPage() {
                           </p>
                         ) : (
                           <div className="mt-2 flex flex-wrap gap-2">
-
+ 
                             {(
                               selectedEvents[
                                 account.id
@@ -624,23 +774,23 @@ export default function InChargesPage() {
                                 </span>
                               )
                             )}
-
+ 
                           </div>
                         )}
-
+ 
                       </div>
-
+ 
                     </div>
-
+ 
                   </div>
                 )
               )}
-
+ 
             </div>
           )}
-
+ 
         </section>
-
+ 
       </div>
     </main>
   );
