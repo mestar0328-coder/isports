@@ -1,385 +1,558 @@
 "use client";
-
-import { useEffect, useState } from "react";
+ 
 import Link from "next/link";
-import SportCard from "@/components/SportCard";
-import { getCustomSports } from "@/data/sportsStorage";
-
-export default function Home() {
-  const [sports, setSports] = useState<ReturnType<typeof getCustomSports>>([]);
-
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import type {
+  Registration,
+  RegistrationStatus,
+} from "@/data/registrations";
+import {
+  getRegistrations,
+  saveRegistrations,
+} from "@/data/registrationStorage";
+ 
+type RegistrationAction = "Approved" | "Rejected" | "Deleted";
+ 
+export default function AdminPage() {
+  const router = useRouter();
+ 
+  const [registrations, setRegistrations] = useState<Registration[]>([]);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("All");
+  const [selectedActions, setSelectedActions] = useState<
+    Record<string, RegistrationAction>
+  >({});
+  const [viewingRegistration, setViewingRegistration] =
+    useState<Registration | null>(null);
+ 
+  // Admin login protection
   useEffect(() => {
-    setSports(getCustomSports());
+    const savedUser = localStorage.getItem("isports_user");
+ 
+    if (!savedUser) {
+      router.replace("/admin/login");
+      return;
+    }
+ 
+    try {
+      const user = JSON.parse(savedUser);
+ 
+      if (user.role !== "admin") {
+        router.replace("/admin/login");
+      }
+    } catch {
+      localStorage.removeItem("isports_user");
+      router.replace("/admin/login");
+    }
+  }, [router]);
+ 
+  // Load registrations and reflect their existing status in the action buttons.
+  useEffect(() => {
+    const savedRegistrations = getRegistrations();
+    setRegistrations(savedRegistrations);
+ 
+    const initialActions: Record<string, RegistrationAction> = {};
+    savedRegistrations.forEach((registration) => {
+      if (
+        registration.status === "Approved" ||
+        registration.status === "Rejected"
+      ) {
+        initialActions[registration.id] = registration.status;
+      }
+    });
+    setSelectedActions(initialActions);
   }, []);
+ 
+  function updateStatus(id: string, status: RegistrationStatus) {
+    const updatedRegistrations = registrations.map((registration) =>
+      registration.id === id
+        ? { ...registration, status }
+        : registration
+    );
+ 
+    setRegistrations(updatedRegistrations);
+    saveRegistrations(updatedRegistrations);
+    setSelectedActions((current) => {
+      if (status === "Pending") {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      }
 
-
-return (
-<main className="min-h-screen overflow-hidden bg-slate-50 text-slate-900">
-{/* Hero Section */}
-<section className="relative isolate overflow-hidden bg-white">
-{/* Background decoration */}
-<div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
-<div className="absolute -right-32 top-0 h-96 w-96 rounded-full bg-blue-100/80 blur-3xl" />
-<div className="absolute -left-32 bottom-0 h-80 w-80 rounded-full bg-sky-100/70 blur-3xl" />
-<div className="absolute inset-0 bg-gradient-to-br from-white via-white/90 to-blue-50/70" />
-</div>
-
-    <div className="mx-auto grid max-w-7xl items-center gap-12 px-5 py-20 sm:px-8 sm:py-24 lg:grid-cols-2 lg:py-32">
-      {/* Hero Text */}
-      <div>
-        <div className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700">
-          <span className="h-2 w-2 rounded-full bg-green-500" />
-          Your Campus. Your Competition. Your Victory.
-        </div>
-
-        <h1 className="mt-7 text-4xl font-black leading-tight tracking-tight text-slate-950 sm:text-5xl lg:text-7xl">
-          Compete
-          <span className="block text-blue-600">Beyond Limits.</span>
-        </h1>
-
-        <p className="mt-6 max-w-xl text-base leading-8 text-slate-600 sm:text-lg">
-          Discover sports events, register for competitions, follow match
-          results, and celebrate every victory — all in one place with
-          iSports.
-        </p>
-
-        <div className="mt-9 flex flex-wrap gap-4">
-          <Link
-            href="/events"
-            className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-7 py-4 font-bold text-white shadow-lg shadow-blue-200 transition hover:-translate-y-1 hover:bg-blue-700"
-          >
-            Explore Events
-            <span aria-hidden="true">→</span>
-          </Link>
-
-          <Link
-            href="/student/login"
-            className="rounded-xl border border-slate-200 bg-white px-7 py-4 font-bold text-slate-700 shadow-sm transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
-          >
-            Student Login
-          </Link>
-        </div>
-
-        {/* Highlights */}
-        <div className="mt-12 grid max-w-lg grid-cols-3 gap-4 border-t border-slate-200 pt-7">
+      return {
+        ...current,
+        [id]: status,
+      };
+    });
+  }
+ 
+  function deleteRegistration(id: string) {
+    const confirmed = window.confirm(
+      "Are you sure you want to delete this registration?"
+    );
+ 
+    if (!confirmed) return;
+ 
+    const updatedRegistrations = registrations.filter(
+      (registration) => registration.id !== id
+    );
+ 
+    setRegistrations(updatedRegistrations);
+    saveRegistrations(updatedRegistrations);
+    setSelectedActions((current) => {
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+ 
+    if (viewingRegistration?.id === id) {
+      setViewingRegistration(null);
+    }
+  }
+ 
+  const filteredRegistrations = useMemo(() => {
+    return registrations.filter((registration) => {
+      const searchText = search.toLowerCase().trim();
+ 
+      const matchesSearch =
+        registration.applicantName.toLowerCase().includes(searchText) ||
+        registration.eventName.toLowerCase().includes(searchText) ||
+        registration.college.toLowerCase().includes(searchText);
+ 
+      const matchesStatus =
+        statusFilter === "All" || registration.status === statusFilter;
+ 
+      return matchesSearch && matchesStatus;
+    });
+  }, [registrations, search, statusFilter]);
+ 
+  const totalRegistrations = registrations.length;
+  const pendingRegistrations = registrations.filter(
+    (registration) => registration.status === "Pending"
+  ).length;
+  const approvedRegistrations = registrations.filter(
+    (registration) => registration.status === "Approved"
+  ).length;
+  const rejectedRegistrations = registrations.filter(
+    (registration) => registration.status === "Rejected"
+  ).length;
+ 
+  // Export registrations as CSV
+  function exportCSV() {
+    const headers = [
+      "Applicant Name",
+      "Event",
+      "College",
+      "Registration Type",
+      "Team Name",
+      "Team Members",
+      "Status",
+      "Registered At",
+    ];
+ 
+    const rows = filteredRegistrations.map((registration) => [
+      registration.applicantName,
+      registration.eventName,
+      registration.college,
+      registration.registrationType,
+      registration.teamName ?? "",
+      registration.teamMembers?.join("; ") ?? "",
+      registration.status,
+      registration.registeredAt,
+    ]);
+ 
+    const csv = [headers, ...rows]
+      .map((row) =>
+        row
+          .map((value) => `"${String(value).replace(/"/g, '""')}"`)
+          .join(",")
+      )
+      .join("\n");
+ 
+    const blob = new Blob([csv], {
+      type: "text/csv;charset=utf-8;",
+    });
+ 
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+ 
+    link.href = url;
+    link.download = "registrations.csv";
+    link.click();
+ 
+    URL.revokeObjectURL(url);
+  }
+ 
+  function actionButtonClass(
+    registrationId: string,
+    action: RegistrationAction,
+    colorClass: string
+  ) {
+    const selectedAction = selectedActions[registrationId];
+    const hasSelection = Boolean(selectedAction);
+    const isSelected = selectedAction === action;
+ 
+    return [
+      "rounded-lg px-4 py-2 font-semibold transition-all duration-150",
+      colorClass,
+      hasSelection && !isSelected
+        ? "opacity-35 saturate-50"
+        : "opacity-100",
+      isSelected
+        ? "ring-2 ring-white ring-offset-2 ring-offset-gray-900 shadow-lg"
+        : "hover:brightness-110",
+    ].join(" ");
+  }
+ 
+  return (
+    <main className="min-h-screen bg-gray-950 px-6 py-10 text-white">
+      <div className="mx-auto max-w-7xl">
+        {/* Dashboard Header */}
+        <div className="mb-8 flex flex-col justify-between gap-4 md:flex-row md:items-center">
           <div>
-            <p className="text-xl font-extrabold text-slate-900 sm:text-2xl">
-              Events
+            <p className="text-sm font-semibold uppercase tracking-widest text-blue-400">
+              Admin
             </p>
-            <p className="mt-1 text-xs text-slate-500 sm:text-sm">
-              Discover sports
-            </p>
-          </div>
-
-          <div className="border-l border-slate-200 pl-4">
-            <p className="text-xl font-extrabold text-slate-900 sm:text-2xl">
-              Results
-            </p>
-            <p className="mt-1 text-xs text-slate-500 sm:text-sm">
-              Follow matches
+            <h1 className="mt-2 text-4xl font-bold">
+              Registration Dashboard
+            </h1>
+            <p className="mt-2 text-gray-400">
+              Manage student registrations and sports events.
             </p>
           </div>
-
-          <div className="border-l border-slate-200 pl-4">
-            <p className="text-xl font-extrabold text-slate-900 sm:text-2xl">
-              iSports
+ 
+          {/* Dashboard Navigation Buttons */}
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={() => router.push("/admin/events")}
+              className="rounded-lg bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-500"
+            >
+              Manage Events
+            </button>
+ 
+            <button
+              type="button"
+              onClick={() => router.push("/admin/sports")}
+              className="rounded-lg bg-green-600 px-5 py-3 font-semibold text-white hover:bg-green-500"
+            >
+              Sports Management
+            </button>
+ 
+            <Link
+              href="/admin/incharges"
+              className="rounded-lg bg-purple-600 px-5 py-3 font-semibold text-white hover:bg-purple-500"
+            >
+              Manage Match In-Charges
+            </Link>
+ 
+            <Link
+              href="/admin/audit"
+              className="rounded-lg bg-purple-600 px-4 py-2 font-semibold hover:bg-purple-500"
+            >
+              Score Audit Log
+            </Link>
+ 
+            <Link
+              href="/admin/audit/alerts"
+              className="rounded-lg border border-red-500 bg-red-50 px-4 py-2 font-semibold text-red-700 hover:bg-red-100"
+            >
+              Alert Management
+            </Link>
+ 
+            <button
+              type="button"
+              onClick={() => router.push("/admin/event/new")}
+              className="rounded-lg border border-blue-500 px-5 py-3 font-semibold text-blue-400 hover:bg-blue-500 hover:text-white"
+            >
+              Create Event
+            </button>
+ 
+            <button
+              type="button"
+              onClick={exportCSV}
+              className="rounded-lg border border-gray-700 px-5 py-3 font-semibold text-gray-200 hover:bg-gray-800"
+            >
+              Export CSV
+            </button>
+ 
+            <button
+              type="button"
+              onClick={() => router.push("/")}
+              className="rounded-lg border border-gray-700 px-5 py-3 font-semibold text-gray-200 hover:bg-gray-800"
+            >
+              Home
+            </button>
+          </div>
+        </div>
+ 
+        {/* Summary Cards */}
+        <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-xl border border-gray-800 bg-gray-900 p-5">
+            <p className="text-sm font-semibold text-gray-400">
+              Total Registrations
             </p>
-            <p className="mt-1 text-xs text-slate-500 sm:text-sm">
-              Play to achieve
+            <p className="mt-2 text-3xl font-bold text-white">
+              {totalRegistrations}
+            </p>
+          </div>
+ 
+          <div className="rounded-xl border border-yellow-900 bg-yellow-950/30 p-5">
+            <p className="text-sm font-semibold text-yellow-400">Pending</p>
+            <p className="mt-2 text-3xl font-bold text-yellow-300">
+              {pendingRegistrations}
+            </p>
+          </div>
+ 
+          <div className="rounded-xl border border-green-900 bg-green-950/30 p-5">
+            <p className="text-sm font-semibold text-green-400">Approved</p>
+            <p className="mt-2 text-3xl font-bold text-green-300">
+              {approvedRegistrations}
+            </p>
+          </div>
+ 
+          <div className="rounded-xl border border-red-900 bg-red-950/30 p-5">
+            <p className="text-sm font-semibold text-red-400">Rejected</p>
+            <p className="mt-2 text-3xl font-bold text-red-300">
+              {rejectedRegistrations}
             </p>
           </div>
         </div>
-      </div>
-
-      {/* Sports Visual Panel */}
-      <div className="relative">
-        <div className="absolute -inset-4 rounded-[2rem] bg-blue-200/50 blur-2xl" />
-
-        <div className="relative overflow-hidden rounded-3xl border border-blue-100 bg-white p-5 shadow-2xl shadow-blue-900/10 sm:p-8">
-          <div className="absolute right-0 top-0 h-48 w-48 rounded-full bg-blue-100/70 blur-3xl" />
-
-          <div className="relative flex items-center justify-between gap-4">
-            <div>
-              <p className="text-sm font-bold uppercase tracking-[0.2em] text-blue-600">
-                The Game Starts Here
-              </p>
-              <h2 className="mt-2 text-2xl font-extrabold text-slate-900 sm:text-3xl">
-                Find Your Sport
-              </h2>
-            </div>
-
-            <span className="text-4xl" aria-hidden="true">
-              🏟️
-            </span>
-          </div>
-
-          <div className="relative mt-8 grid grid-cols-2 gap-4">
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 transition hover:border-blue-300 hover:bg-blue-50">
-              <div className="text-4xl" aria-hidden="true">
-                🏀
-              </div>
-              <h3 className="mt-4 font-bold text-slate-900">
-                Basketball
-              </h3>
-              <p className="mt-1 text-sm text-slate-500">
-                Team up and compete
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 transition hover:border-blue-300 hover:bg-blue-50">
-              <div className="text-4xl" aria-hidden="true">
-                ⚽
-              </div>
-              <h3 className="mt-4 font-bold text-slate-900">Football</h3>
-              <p className="mt-1 text-sm text-slate-500">
-                Chase the victory
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 transition hover:border-blue-300 hover:bg-blue-50">
-              <div className="text-4xl" aria-hidden="true">
-                🏐
-              </div>
-              <h3 className="mt-4 font-bold text-slate-900">
-                Volleyball
-              </h3>
-              <p className="mt-1 text-sm text-slate-500">Play as one</p>
-            </div>
-
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 transition hover:border-blue-300 hover:bg-blue-50">
-              <div className="text-4xl" aria-hidden="true">
-                🏸
-              </div>
-              <h3 className="mt-4 font-bold text-slate-900">
-                Badminton
-              </h3>
-              <p className="mt-1 text-sm text-slate-500">
-                Bring your best
-              </p>
-            </div>
-          </div>
-
-          <div className="relative mt-5 flex items-center gap-3 rounded-xl border border-green-200 bg-green-50 p-4">
-            <span className="text-2xl" aria-hidden="true">
-              🏆
-            </span>
-            <div>
-              <p className="text-sm font-bold text-green-800">
-                Every Game Matters
-              </p>
-              <p className="mt-1 text-xs leading-5 text-slate-600">
-                Participate, compete, and track your progress.
-              </p>
-            </div>
-          </div>
+ 
+        {/* Filters */}
+        <div className="mb-6 grid gap-4 md:grid-cols-2">
+          <input
+            type="text"
+            placeholder="Search by applicant, event, or college..."
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            className="rounded-lg border border-gray-700 bg-gray-900 px-4 py-3 text-white outline-none focus:border-blue-500"
+          />
+ 
+          <select
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value)}
+            className="rounded-lg border border-gray-700 bg-gray-900 px-4 py-3 text-white outline-none focus:border-blue-500"
+          >
+            <option value="All">All Statuses</option>
+            <option value="Pending">Pending</option>
+            <option value="Approved">Approved</option>
+            <option value="Rejected">Rejected</option>
+          </select>
         </div>
-      </div>
-    </div>
-  </section>
-
-  {/* Login Portals */}
-  <section className="border-t border-slate-200 bg-slate-50 px-5 py-20 sm:px-8">
-    <div className="mx-auto max-w-7xl">
-      <div className="mx-auto mb-12 max-w-2xl text-center">
-        <p className="text-sm font-bold uppercase tracking-[0.2em] text-blue-600">
-          Access iSports
+ 
+        <p className="mb-4 text-sm text-gray-500">
+          Showing {filteredRegistrations.length} registration(s)
         </p>
-
-        <h2 className="mt-3 text-3xl font-extrabold text-slate-900 sm:text-4xl">
-          Your Portal, Your Purpose
-        </h2>
-
-        <p className="mt-4 leading-7 text-slate-600">
-          Choose your role to access the tools and features designed for
-          you.
-        </p>
+ 
+        {/* Registration List */}
+        {filteredRegistrations.length === 0 ? (
+          <div className="rounded-xl border border-gray-800 bg-gray-900 p-10 text-center text-gray-400">
+            No registrations found.
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {filteredRegistrations.map((registration) => {
+              const selectedAction = selectedActions[registration.id];
+ 
+              return (
+                <div
+                  key={registration.id}
+                  className="rounded-xl border border-gray-800 bg-gray-900 p-6"
+                >
+                  <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">
+                    <div>
+                      <h2 className="text-xl font-bold">
+                        {registration.applicantName}
+                      </h2>
+                      <p className="mt-1 text-blue-400">
+                        {registration.eventName}
+                      </p>
+                      <p className="mt-2 text-gray-400">
+                        College: {registration.college}
+                      </p>
+                      <p className="mt-1 text-sm text-gray-400">
+                        Type: {registration.registrationType}
+                      </p>
+                      {registration.teamName && (
+                        <p className="mt-1 text-sm text-gray-400">
+                          Team: {registration.teamName}
+                        </p>
+                      )}
+                      <p className="mt-2 text-sm text-gray-500">
+                        Status: {registration.status}
+                      </p>
+                      <p className="mt-1 text-sm text-gray-500">
+                        Registered on: {registration.registeredAt}
+                      </p>
+                    </div>
+ 
+                    {/* Registration Actions */}
+                    <div className="flex flex-col items-start gap-3">
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          aria-pressed={selectedAction === "Approved"}
+                          onClick={() =>
+                            updateStatus(registration.id, "Approved")
+                          }
+                          className={actionButtonClass(
+                            registration.id,
+                            "Approved",
+                            "bg-green-600 text-white"
+                          )}
+                        >
+                          Approve
+                        </button>
+ 
+                        <button
+                          type="button"
+                          aria-pressed={selectedAction === "Rejected"}
+                          onClick={() =>
+                            updateStatus(registration.id, "Rejected")
+                          }
+                          className={actionButtonClass(
+                            registration.id,
+                            "Rejected",
+                            "bg-yellow-600 text-white"
+                          )}
+                        >
+                          Reject
+                        </button>
+ 
+                        <button
+                          type="button"
+                          onClick={() => deleteRegistration(registration.id)}
+                          className="rounded-lg bg-red-600 px-4 py-2 font-semibold text-white transition hover:bg-red-500"
+                        >
+                          Delete
+                        </button>
+                      </div>
+ 
+                      {selectedAction && (
+                        <p className="text-xs font-medium text-gray-400">
+                          Last selected action:{" "}
+                          <span
+                            className={
+                              selectedAction === "Approved"
+                                ? "text-green-400"
+                                : selectedAction === "Rejected"
+                                  ? "text-yellow-400"
+                                  : "text-red-400"
+                            }
+                          >
+                            {selectedAction}
+                          </span>
+                        </p>
+                      )}
+ 
+                      {/* View button below Approve / Reject / Delete */}
+                      <button
+                        type="button"
+                        onClick={() => setViewingRegistration(registration)}
+                        className="w-full rounded-lg border border-blue-500 px-4 py-2 text-sm font-semibold text-blue-300 transition hover:bg-blue-600 hover:text-white"
+                      >
+                        View Applicant Details
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
-
-      <div className="grid gap-6 md:grid-cols-3">
-        {/* Student */}
-        <Link
-          href="/student/login"
-          className="group rounded-2xl border border-slate-200 bg-white p-7 shadow-sm transition duration-300 hover:-translate-y-2 hover:border-blue-300 hover:shadow-xl hover:shadow-blue-100/70"
+ 
+      {/* Complete Applicant Details Modal */}
+      {viewingRegistration && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setViewingRegistration(null);
+            }
+          }}
         >
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-3xl ring-1 ring-blue-100">
-            🎓
-          </div>
-
-          <h3 className="mt-6 text-xl font-extrabold text-slate-900">
-            Student Portal
-          </h3>
-
-          <p className="mt-3 min-h-14 text-sm leading-6 text-slate-600">
-            Discover events, register for competitions, track applications,
-            and check results.
-          </p>
-
-          <div className="mt-6 flex items-center justify-between gap-3">
-            <span className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-bold text-white transition group-hover:bg-blue-700">
-              Student Login
-            </span>
-            <span className="text-xl text-blue-600 transition group-hover:translate-x-1">
-              →
-            </span>
-          </div>
-        </Link>
-
-        {/* Admin */}
-        <Link
-          href="/admin/login"
-          className="group rounded-2xl border border-slate-200 bg-white p-7 shadow-sm transition duration-300 hover:-translate-y-2 hover:border-purple-300 hover:shadow-xl hover:shadow-purple-100/70"
-        >
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-purple-50 text-3xl ring-1 ring-purple-100">
-            🛡️
-          </div>
-
-          <h3 className="mt-6 text-xl font-extrabold text-slate-900">
-            Admin Portal
-          </h3>
-
-          <p className="mt-3 min-h-14 text-sm leading-6 text-slate-600">
-            Manage sports events, registrations, match operations, and
-            administrative tools.
-          </p>
-
-          <div className="mt-6 flex items-center justify-between gap-3">
-            <span className="rounded-lg bg-purple-600 px-4 py-2.5 text-sm font-bold text-white transition group-hover:bg-purple-700">
-              Admin Login
-            </span>
-            <span className="text-xl text-purple-600 transition group-hover:translate-x-1">
-              →
-            </span>
-          </div>
-        </Link>
-
-        {/* In-Charge */}
-        <Link
-          href="/incharge/login"
-          className="group rounded-2xl border border-slate-200 bg-white p-7 shadow-sm transition duration-300 hover:-translate-y-2 hover:border-green-300 hover:shadow-xl hover:shadow-green-100/70"
-        >
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-green-50 text-3xl ring-1 ring-green-100">
-            🏆
-          </div>
-
-          <h3 className="mt-6 text-xl font-extrabold text-slate-900">
-            Match In-Charge
-          </h3>
-
-          <p className="mt-3 min-h-14 text-sm leading-6 text-slate-600">
-            Access assigned events, manage matches, and enter competition
-            scores.
-          </p>
-
-          <div className="mt-6 flex items-center justify-between gap-3">
-            <span className="rounded-lg bg-green-600 px-4 py-2.5 text-sm font-bold text-white transition group-hover:bg-green-700">
-              In-Charge Login
-            </span>
-            <span className="text-xl text-green-600 transition group-hover:translate-x-1">
-              →
-            </span>
-          </div>
-        </Link>
-      </div>
-    </div>
-  </section>
-
-  {/* Available Sports */}
-  <section className="bg-white px-5 py-20 sm:px-8">
-    <div className="mx-auto max-w-7xl">
-      <div className="mb-10 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="text-sm font-bold uppercase tracking-[0.2em] text-blue-600">
-            Explore
-          </p>
-
-          <h2 className="mt-3 text-3xl font-extrabold text-slate-900 sm:text-4xl">
-            Available Sports
-          </h2>
-
-          <p className="mt-3 max-w-xl leading-7 text-slate-600">
-            Explore the sports created by the iSports administrator and
-            find your next competition.
-          </p>
-        </div>
-
-        <Link
-          href="/events"
-          className="rounded-xl border border-blue-200 bg-blue-50 px-5 py-3 text-sm font-bold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100"
-        >
-          Browse Events →
-        </Link>
-      </div>
-
-      {sports.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-14 text-center">
-          <div className="text-5xl" aria-hidden="true">
-            🏟️
-          </div>
-
-          <h3 className="mt-5 text-xl font-bold text-slate-900">
-            Your Next Sport Starts Here
-          </h3>
-
-          <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-slate-600">
-            No sports have been added yet. Once an administrator creates
-            sports, they will appear here.
-          </p>
-        </div>
-      ) : (
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {sports.map((sport) => (
-            <SportCard
-              key={sport.id}
-              name={sport.name}
-              icon={typeof sport.icon === "string" ? sport.icon : "🏅"}
-              description={`${sport.name} events and players.`}
-              href={`/sports/${sport.id}`}
-            />
-          ))}
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="applicant-details-title"
+            className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-gray-700 bg-gray-900 p-6 shadow-2xl"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold uppercase tracking-wider text-blue-400">
+                  Registration information
+                </p>
+                <h2
+                  id="applicant-details-title"
+                  className="mt-1 text-2xl font-bold text-white"
+                >
+                  Complete Applicant Details
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewingRegistration(null)}
+                aria-label="Close applicant details"
+                className="rounded-lg border border-gray-700 px-3 py-2 text-gray-300 hover:bg-gray-800"
+              >
+                Close
+              </button>
+            </div>
+ 
+            <div className="mt-6 grid gap-4 sm:grid-cols-2">
+              <Detail label="Applicant Name" value={viewingRegistration.applicantName} />
+              <Detail label="Registration ID" value={viewingRegistration.id} />
+              <Detail label="Event Name" value={viewingRegistration.eventName} />
+              <Detail label="Event ID" value={viewingRegistration.eventId} />
+              <Detail label="College" value={viewingRegistration.college} />
+              <Detail label="Registration Type" value={viewingRegistration.registrationType} />
+              <Detail label="Team Name" value={viewingRegistration.teamName || "Not applicable"} />
+              <Detail label="Status" value={viewingRegistration.status} />
+              <Detail label="Registered At" value={viewingRegistration.registeredAt} />
+              <div className="rounded-lg border border-gray-700 bg-gray-950 p-4 sm:col-span-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  Team Members
+                </p>
+                {viewingRegistration.teamMembers?.length ? (
+                  <ul className="mt-2 list-inside list-disc space-y-1 text-sm text-gray-200">
+                    {viewingRegistration.teamMembers.map((member, index) => (
+                      <li key={`${index}-${member}`}>{member}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="mt-2 text-sm text-gray-300">
+                    No team-member details were supplied for this registration.
+                  </p>
+                )}
+              </div>
+            </div>
+ 
+            <div className="mt-6 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setViewingRegistration(null)}
+                className="rounded-lg bg-blue-600 px-5 py-2.5 font-semibold text-white hover:bg-blue-500"
+              >
+                Done
+              </button>
+            </div>
+          </section>
         </div>
       )}
-    </div>
-  </section>
-
-  {/* Homepage Footer */}
-  <footer className="border-t border-slate-200 bg-slate-50 px-5 py-8 sm:px-8">
-    <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 text-center sm:flex-row sm:text-left">
-      <div>
-        <p className="text-lg font-extrabold text-slate-900">
-          <span className="text-blue-600">i</span>Sports
-        </p>
-        <p className="mt-1 text-sm text-slate-500">
-          Organize. Compete. Achieve.
-        </p>
-      </div>
-
-      <div className="flex flex-wrap justify-center gap-5 text-sm font-medium text-slate-600">
-        <Link
-          href="/events"
-          className="transition hover:text-blue-700"
-        >
-          Events
-        </Link>
-        <Link
-          href="/results"
-          className="transition hover:text-blue-700"
-        >
-          Results
-        </Link>
-        <Link
-          href="/student/login"
-          className="transition hover:text-blue-700"
-        >
-          Student Login
-        </Link>
-      </div>
-
-      <p className="text-xs text-slate-500">
-        © {new Date().getFullYear()} iSports. All rights reserved.
+    </main>
+  );
+}
+ 
+function Detail({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-gray-700 bg-gray-950 p-4">
+      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+        {label}
       </p>
+      <p className="mt-2 break-words text-sm text-gray-100">{value}</p>
     </div>
-  </footer>
-</main>
-
-);
+  );
 }
